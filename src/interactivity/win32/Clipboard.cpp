@@ -32,7 +32,7 @@ void Clipboard::Copy(bool fAlsoCopyFormatting)
 {
     try
     {
-        // registry settings may tell us to always copy the color/formating
+        // registry settings may tell us to always copy the color/formatting
         CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
         fAlsoCopyFormatting = fAlsoCopyFormatting || gci.GetCopyColor();
 
@@ -133,7 +133,7 @@ void Clipboard::StringPaste(_In_reads_(cchData) const wchar_t* const pData,
 std::deque<std::unique_ptr<IInputEvent>> Clipboard::TextToKeyEvents(_In_reads_(cchData) const wchar_t* const pData,
                                                                     const size_t cchData)
 {
-    THROW_IF_NULL_ALLOC(pData);
+    THROW_HR_IF_NULL(E_INVALIDARG, pData);
 
     std::deque<std::unique_ptr<IInputEvent>> keyEvents;
 
@@ -301,7 +301,7 @@ void Clipboard::CopyTextToSystemClipboard(const TextBuffer::TextAndColor& rows, 
 }
 
 // Routine Description:
-// - Copies the given string onto the global system clipboard in the sepcified format
+// - Copies the given string onto the global system clipboard in the specified format
 // Arguments:
 // - stringToCopy - The string to copy
 // - lpszFormat - the name of the format

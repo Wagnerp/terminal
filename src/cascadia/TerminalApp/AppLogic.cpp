@@ -27,10 +27,12 @@ namespace winrt
 // !!! IMPORTANT !!!
 // Make sure that these keys are in the same order as the
 // SettingsLoadWarnings/Errors enum is!
-static const std::array<std::wstring_view, 3> settingsLoadWarningsLabels {
+static const std::array<std::wstring_view, 5> settingsLoadWarningsLabels {
     USES_RESOURCE(L"MissingDefaultProfileText"),
     USES_RESOURCE(L"DuplicateProfileText"),
-    USES_RESOURCE(L"UnknownColorSchemeText")
+    USES_RESOURCE(L"UnknownColorSchemeText"),
+    USES_RESOURCE(L"InvalidBackgroundImage"),
+    USES_RESOURCE(L"InvalidIcon")
 };
 static const std::array<std::wstring_view, 2> settingsLoadErrorsLabels {
     USES_RESOURCE(L"NoProfilesText"),
@@ -129,7 +131,7 @@ namespace winrt::TerminalApp::implementation
         _root = winrt::make_self<TerminalPage>();
     }
 
-    // Method Decscription:
+    // Method Description:
     // - Called around the codebase to discover if this is a UWP where we need to turn off specific settings.
     // Arguments:
     // - <none> - reports internal state
@@ -170,7 +172,7 @@ namespace winrt::TerminalApp::implementation
         _root->ShowDialog({ this, &AppLogic::_ShowDialog });
 
         // In UWP mode, we cannot handle taking over the title bar for tabs,
-        // so this setting is overriden to false no matter what the preference is.
+        // so this setting is overridden to false no matter what the preference is.
         if (_isUwp)
         {
             _settings->GlobalSettings().SetShowTabsInTitlebar(false);
@@ -195,8 +197,8 @@ namespace winrt::TerminalApp::implementation
     // - Show a ContentDialog with buttons to take further action. Uses the
     //   FrameworkElements provided as the title and content of this dialog, and
     //   displays buttons (or a single button). Two buttons (primary and secondary)
-    //   will be displayed if this is an warning dialog for closing the termimal,
-    //   this allows the users to abondon the closing action. Otherwise, a single
+    //   will be displayed if this is an warning dialog for closing the terminal,
+    //   this allows the users to abandon the closing action. Otherwise, a single
     //   close button will be displayed.
     // - Only one dialog can be visible at a time. If another dialog is visible
     //   when this is called, nothing happens.
@@ -277,6 +279,7 @@ namespace winrt::TerminalApp::implementation
         dialog.Title(winrt::box_value(title));
         dialog.Content(winrt::box_value(warningsTextBlock));
         dialog.CloseButtonText(buttonText);
+        dialog.DefaultButton(Controls::ContentDialogButton::Close);
 
         _ShowDialog(nullptr, dialog);
     }
@@ -313,12 +316,13 @@ namespace winrt::TerminalApp::implementation
         dialog.Title(winrt::box_value(title));
         dialog.Content(winrt::box_value(warningsTextBlock));
         dialog.CloseButtonText(buttonText);
+        dialog.DefaultButton(Controls::ContentDialogButton::Close);
 
         _ShowDialog(nullptr, dialog);
     }
 
     // Method Description:
-    // - Triggered when the application is fiished loading. If we failed to load
+    // - Triggered when the application is finished loading. If we failed to load
     //   the settings, then this will display the error dialog. This is done
     //   here instead of when loading the settings, because we need our UI to be
     //   visible to display the dialog, and when we're loading the settings,
@@ -394,7 +398,7 @@ namespace winrt::TerminalApp::implementation
     //   default size, which is provided in IslandWindow::MakeWindow.
     // Arguments:
     // - defaultInitialX: the system default x coordinate value
-    // - defaultInitialY: the system defualt y coordinate value
+    // - defaultInitialY: the system default y coordinate value
     // Return Value:
     // - a point containing the requested initial position in pixels.
     winrt::Windows::Foundation::Point AppLogic::GetLaunchInitialPositions(int32_t defaultInitialX, int32_t defaultInitialY)
@@ -441,6 +445,13 @@ namespace winrt::TerminalApp::implementation
         }
 
         return _settings->GlobalSettings().GetShowTabsInTitlebar();
+    }
+
+    // Method Description:
+    // - See Pane::CalcSnappedDimension
+    float AppLogic::CalcSnappedDimension(const bool widthOrHeight, const float dimension) const
+    {
+        return _root->CalcSnappedDimension(widthOrHeight, dimension);
     }
 
     // Method Description:
@@ -582,6 +593,30 @@ namespace winrt::TerminalApp::implementation
         }
     }
 
+    fire_and_forget AppLogic::_LoadErrorsDialogRoutine()
+    {
+        co_await winrt::resume_foreground(_root->Dispatcher());
+
+        const winrt::hstring titleKey = USES_RESOURCE(L"ReloadJsonParseErrorTitle");
+        const winrt::hstring textKey = USES_RESOURCE(L"ReloadJsonParseErrorText");
+        _ShowLoadErrorsDialog(titleKey, textKey, _settingsLoadedResult);
+    }
+
+    fire_and_forget AppLogic::_ShowLoadWarningsDialogRoutine()
+    {
+        co_await winrt::resume_foreground(_root->Dispatcher());
+
+        _ShowLoadWarningsDialog();
+    }
+
+    fire_and_forget AppLogic::_RefreshThemeRoutine()
+    {
+        co_await winrt::resume_foreground(_root->Dispatcher());
+
+        // Refresh the UI theme
+        _ApplyTheme(_settings->GlobalSettings().GetRequestedTheme());
+    }
+
     // Method Description:
     // - Reloads the settings from the profile.json.
     void AppLogic::_ReloadSettings()
@@ -595,19 +630,12 @@ namespace winrt::TerminalApp::implementation
 
         if (FAILED(_settingsLoadedResult))
         {
-            _root->Dispatcher().RunAsync(CoreDispatcherPriority::Normal, [this]() {
-                const winrt::hstring titleKey = USES_RESOURCE(L"ReloadJsonParseErrorTitle");
-                const winrt::hstring textKey = USES_RESOURCE(L"ReloadJsonParseErrorText");
-                _ShowLoadErrorsDialog(titleKey, textKey, _settingsLoadedResult);
-            });
-
+            _LoadErrorsDialogRoutine();
             return;
         }
         else if (_settingsLoadedResult == S_FALSE)
         {
-            _root->Dispatcher().RunAsync(CoreDispatcherPriority::Normal, [this]() {
-                _ShowLoadWarningsDialog();
-            });
+            _ShowLoadWarningsDialogRoutine();
         }
 
         // Here, we successfully reloaded the settings, and created a new
@@ -616,10 +644,7 @@ namespace winrt::TerminalApp::implementation
         // Update the settings in TerminalPage
         _root->SetSettings(_settings, true);
 
-        _root->Dispatcher().RunAsync(CoreDispatcherPriority::Normal, [this]() {
-            // Refresh the UI theme
-            _ApplyTheme(_settings->GlobalSettings().GetRequestedTheme());
-        });
+        _RefreshThemeRoutine();
     }
 
     // Method Description:
@@ -664,7 +689,7 @@ namespace winrt::TerminalApp::implementation
 
     // Method Description:
     // - Used to tell the app that the titlebar has been clicked. The App won't
-    //   actually recieve any clicks in the titlebar area, so this is a helper
+    //   actually receive any clicks in the titlebar area, so this is a helper
     //   to clue the app in that a click has happened. The App will use this as
     //   a indicator that it needs to dismiss any open flyouts.
     // Arguments:
@@ -693,6 +718,24 @@ namespace winrt::TerminalApp::implementation
         {
             _root->CloseWindow();
         }
+    }
+
+    int32_t AppLogic::SetStartupCommandline(array_view<const winrt::hstring> actions)
+    {
+        if (_root)
+        {
+            return _root->SetStartupCommandline(actions);
+        }
+        return 0;
+    }
+
+    winrt::hstring AppLogic::EarlyExitMessage()
+    {
+        if (_root)
+        {
+            return _root->EarlyExitMessage();
+        }
+        return { L"" };
     }
 
     // -------------------------------- WinRT Events ---------------------------------

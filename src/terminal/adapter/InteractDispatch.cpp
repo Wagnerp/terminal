@@ -17,7 +17,7 @@ using namespace Microsoft::Console::VirtualTerminal;
 InteractDispatch::InteractDispatch(std::unique_ptr<ConGetSet> pConApi) :
     _pConApi(std::move(pConApi))
 {
-    THROW_IF_NULL_ALLOC(_pConApi.get());
+    THROW_HR_IF_NULL(E_INVALIDARG, _pConApi.get());
 }
 
 // Method Description:
@@ -88,7 +88,7 @@ bool InteractDispatch::WriteString(const std::wstring_view string)
 // Window Manipulation - Performs a variety of actions relating to the window,
 //      such as moving the window position, resizing the window, querying
 //      window state, forcing the window to repaint, etc.
-//  This is kept seperate from the output version, as there may be
+//  This is kept separate from the output version, as there may be
 //      codes that are supported in one direction but not the other.
 //Arguments:
 // - function - An identifier of the WindowManipulation function to perform

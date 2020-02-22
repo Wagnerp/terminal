@@ -28,6 +28,15 @@ namespace Microsoft::Terminal::Core
     class Terminal;
 }
 
+// fwdecl unittest classes
+#ifdef UNIT_TESTING
+namespace TerminalCoreUnitTests
+{
+    class TerminalBufferTests;
+    class ConptyRoundtripTests;
+};
+#endif
+
 class Microsoft::Terminal::Core::Terminal final :
     public Microsoft::Terminal::Core::ITerminalApi,
     public Microsoft::Terminal::Core::ITerminalInput,
@@ -75,6 +84,7 @@ public:
     bool ReverseText(bool reversed) noexcept override;
     bool SetCursorPosition(short x, short y) noexcept override;
     COORD GetCursorPosition() noexcept override;
+    bool CursorLineFeed(const bool withReturn) noexcept override;
     bool DeleteCharacter(const size_t count) noexcept override;
     bool InsertCharacter(const size_t count) noexcept override;
     bool EraseCharacters(const size_t numChars) noexcept override;
@@ -131,7 +141,8 @@ public:
     const bool IsSelectionActive() const noexcept override;
     void ClearSelection() override;
     void SelectNewRegion(const COORD coordStart, const COORD coordEnd) override;
-    const COORD GetSelectionAnchor() const override;
+    const COORD GetSelectionAnchor() const noexcept override;
+    const COORD GetEndSelectionPosition() const noexcept override;
     const std::wstring GetConsoleTitle() const noexcept override;
     void ColorSelection(const COORD coordSelectionStart, const COORD coordSelectionEnd, const TextAttribute) override;
 #pragma endregion
@@ -215,7 +226,7 @@ private:
     //      _visibleTop as well.
     // Additionally, maybe some people want to scroll into the history, then have that scroll out from
     //      underneath them, while others would prefer to anchor it in place.
-    //      Either way, we sohould make this behavior controlled by a setting.
+    //      Either way, we should make this behavior controlled by a setting.
 
     static WORD _ScanCodeFromVirtualKey(const WORD vkey) noexcept;
     static wchar_t _CharacterFromKeyEvent(const WORD vkey, const WORD scanCode, const ControlKeyStates states) noexcept;
@@ -229,6 +240,8 @@ private:
     void _InitializeColorTable();
 
     void _WriteBuffer(const std::wstring_view& stringView);
+
+    void _AdjustCursorPosition(const COORD proposedPosition);
 
     void _NotifyScrollEvent() noexcept;
 
@@ -245,4 +258,9 @@ private:
     SMALL_RECT _GetSelectionRow(const SHORT row, const COORD higherCoord, const COORD lowerCoord) const;
     void _ExpandSelectionRow(SMALL_RECT& selectionRow) const;
 #pragma endregion
+
+#ifdef UNIT_TESTING
+    friend class TerminalCoreUnitTests::TerminalBufferTests;
+    friend class TerminalCoreUnitTests::ConptyRoundtripTests;
+#endif
 };

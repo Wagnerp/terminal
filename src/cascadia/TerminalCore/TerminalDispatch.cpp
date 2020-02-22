@@ -37,11 +37,11 @@ try
     SHORT x{ 0 };
     SHORT y{ 0 };
 
-    RETURN_BOOL_IF_FALSE(FAILED(SizeTToShort(column, &x)) ||
-                         FAILED(SizeTToShort(line, &y)));
+    RETURN_BOOL_IF_FALSE(SUCCEEDED(SizeTToShort(column, &x)) &&
+                         SUCCEEDED(SizeTToShort(line, &y)));
 
-    RETURN_BOOL_IF_FALSE(FAILED(ShortSub(x, 1, &x)) ||
-                         FAILED(ShortSub(y, 1, &y)));
+    RETURN_BOOL_IF_FALSE(SUCCEEDED(ShortSub(x, 1, &x)) &&
+                         SUCCEEDED(ShortSub(y, 1, &y)));
 
     return _terminalApi.SetCursorPosition(x, y);
 }
@@ -74,10 +74,36 @@ try
 }
 CATCH_LOG_RETURN_FALSE()
 
+bool TerminalDispatch::LineFeed(const DispatchTypes::LineFeedType lineFeedType) noexcept
+try
+{
+    switch (lineFeedType)
+    {
+    case DispatchTypes::LineFeedType::DependsOnMode:
+        // There is currently no need for mode-specific line feeds in the Terminal,
+        // so for now we just treat them as a line feed without carriage return.
+    case DispatchTypes::LineFeedType::WithoutReturn:
+        return _terminalApi.CursorLineFeed(false);
+    case DispatchTypes::LineFeedType::WithReturn:
+        return _terminalApi.CursorLineFeed(true);
+    default:
+        return false;
+    }
+}
+CATCH_LOG_RETURN_FALSE()
+
 bool TerminalDispatch::EraseCharacters(const size_t numChars) noexcept
 try
 {
     return _terminalApi.EraseCharacters(numChars);
+}
+CATCH_LOG_RETURN_FALSE()
+
+bool TerminalDispatch::CarriageReturn() noexcept
+try
+{
+    const auto cursorPos = _terminalApi.GetCursorPosition();
+    return _terminalApi.SetCursorPosition(0, cursorPos.Y);
 }
 CATCH_LOG_RETURN_FALSE()
 

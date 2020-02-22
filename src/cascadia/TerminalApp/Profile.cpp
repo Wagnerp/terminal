@@ -185,12 +185,12 @@ TerminalSettings Profile::CreateTerminalSettings(const std::unordered_map<std::w
     terminalSettings.FontSize(_fontSize);
     terminalSettings.Padding(_padding);
 
-    terminalSettings.Commandline(winrt::to_hstring(_commandline.c_str()));
+    terminalSettings.Commandline(_commandline);
 
     if (_startingDirectory)
     {
         const auto evaluatedDirectory = Profile::EvaluateStartingDirectory(_startingDirectory.value());
-        terminalSettings.StartingDirectory(winrt::to_hstring(evaluatedDirectory.c_str()));
+        terminalSettings.StartingDirectory(evaluatedDirectory);
     }
 
     // GH#2373: Use the tabTitle as the starting title if it exists, otherwise
@@ -231,7 +231,7 @@ TerminalSettings Profile::CreateTerminalSettings(const std::unordered_map<std::w
 
     if (HasBackgroundImage())
     {
-        terminalSettings.BackgroundImage(GetExpandedBackgroundImagePath().c_str());
+        terminalSettings.BackgroundImage(GetExpandedBackgroundImagePath());
     }
 
     if (_backgroundImageOpacity)
@@ -848,6 +848,14 @@ void Profile::SetIconPath(std::wstring_view path)
 }
 
 // Method Description:
+// - Resets the std::optional holding the icon file path string.
+//   HasIcon() will return false after the execution of this function.
+void Profile::ResetIconPath()
+{
+    _icon.reset();
+}
+
+// Method Description:
 // - Returns this profile's icon path, if one is set. Otherwise returns the
 //   empty string. This method will expand any environment variables in the
 //   path, if there are any.
@@ -878,6 +886,14 @@ winrt::hstring Profile::GetExpandedBackgroundImagePath() const
     }
 
     return result;
+}
+
+// Method Description:
+// - Resets the std::optional holding the background image file path string.
+//   HasBackgroundImage() will return false after the execution of this function.
+void Profile::ResetBackgroundImagePath()
+{
+    _backgroundImage.reset();
 }
 
 // Method Description:
@@ -920,7 +936,7 @@ CloseOnExitMode Profile::GetCloseOnExitMode() const noexcept
 // Arguments:
 // - <none>
 // Return Value:
-// - true iff the profile chould be hidden from the list of profiles.
+// - true iff the profile should be hidden from the list of profiles.
 bool Profile::IsHidden() const noexcept
 {
     return _hidden;
@@ -1293,7 +1309,7 @@ bool Profile::IsDynamicProfileObject(const Json::Value& json)
 GUID Profile::_GenerateGuidForProfile(const std::wstring& name, const std::optional<std::wstring>& source) noexcept
 {
     // If we have a _source, then we can from a dynamic profile generator. Use
-    // our source to build the naespace guid, instead of using the default GUID.
+    // our source to build the namespace guid, instead of using the default GUID.
 
     const GUID namespaceGuid = source.has_value() ?
                                    Utils::CreateV5Uuid(RUNTIME_GENERATED_PROFILE_NAMESPACE_GUID, gsl::as_bytes(gsl::make_span(source.value()))) :

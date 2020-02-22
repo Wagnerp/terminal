@@ -24,6 +24,14 @@ Author(s):
 #include <string>
 #include <functional>
 
+// fwdecl unittest classes
+#ifdef UNIT_TESTING
+namespace TerminalCoreUnitTests
+{
+    class ConptyRoundtripTests;
+};
+#endif
+
 namespace Microsoft::Console::Render
 {
     class VtEngine : public RenderEngineBase, public Microsoft::Console::ITerminalOutputConnection
@@ -136,6 +144,8 @@ namespace Microsoft::Console::Render
         Microsoft::Console::VirtualTerminal::RenderTracing _trace;
         bool _inResizeRequest{ false };
 
+        bool _delayedEolWrap{ false };
+
         [[nodiscard]] HRESULT _Write(std::string_view const str) noexcept;
         [[nodiscard]] HRESULT _WriteFormattedString(const std::string* const pFormat, ...) noexcept;
         [[nodiscard]] HRESULT _Flush() noexcept;
@@ -220,6 +230,8 @@ namespace Microsoft::Console::Render
         bool _usingTestCallback;
 
         friend class VtRendererTest;
+        friend class ConptyOutputTests;
+        friend class TerminalCoreUnitTests::ConptyRoundtripTests;
 #endif
 
         void SetTestCallback(_In_ std::function<bool(const char* const, size_t const)> pfn);

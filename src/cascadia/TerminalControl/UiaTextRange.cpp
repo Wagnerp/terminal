@@ -8,35 +8,7 @@
 using namespace Microsoft::Terminal;
 using namespace Microsoft::Console::Types;
 using namespace Microsoft::WRL;
-
-HRESULT UiaTextRange::GetSelectionRanges(_In_ IUiaData* pData,
-                                         _In_ IRawElementProviderSimple* pProvider,
-                                         _In_ const std::wstring_view wordDelimiters,
-                                         _Out_ std::deque<ComPtr<UiaTextRange>>& ranges)
-{
-    try
-    {
-        typename std::remove_reference<decltype(ranges)>::type temporaryResult;
-
-        // get the selection rects
-        const auto rectangles = pData->GetSelectionRects();
-
-        // create a range for each row
-        for (const auto& rect : rectangles)
-        {
-            ScreenInfoRow currentRow = rect.Top();
-            Endpoint start = _screenInfoRowToEndpoint(pData, currentRow) + rect.Left();
-            Endpoint end = _screenInfoRowToEndpoint(pData, currentRow) + rect.RightInclusive();
-
-            ComPtr<UiaTextRange> range;
-            RETURN_IF_FAILED(MakeAndInitialize<UiaTextRange>(&range, pData, pProvider, start, end, false, wordDelimiters));
-            temporaryResult.emplace_back(std::move(range));
-        }
-        std::swap(temporaryResult, ranges);
-        return S_OK;
-    }
-    CATCH_RETURN();
-}
+using namespace winrt::Windows::Graphics::Display;
 
 // degenerate range constructor.
 HRESULT UiaTextRange::RuntimeClassInitialize(_In_ IUiaData* pData, _In_ IRawElementProviderSimple* const pProvider, _In_ const std::wstring_view wordDelimiters)
@@ -54,12 +26,11 @@ HRESULT UiaTextRange::RuntimeClassInitialize(_In_ IUiaData* pData,
 
 HRESULT UiaTextRange::RuntimeClassInitialize(_In_ IUiaData* pData,
                                              _In_ IRawElementProviderSimple* const pProvider,
-                                             const Endpoint start,
-                                             const Endpoint end,
-                                             const bool degenerate,
+                                             const COORD start,
+                                             const COORD end,
                                              const std::wstring_view wordDelimiters)
 {
-    return UiaTextRangeBase::RuntimeClassInitialize(pData, pProvider, start, end, degenerate, wordDelimiters);
+    return UiaTextRangeBase::RuntimeClassInitialize(pData, pProvider, start, end, wordDelimiters);
 }
 
 // returns a degenerate text range of the start of the row closest to the y value of point
@@ -107,18 +78,10 @@ IFACEMETHODIMP UiaTextRange::Clone(_Outptr_result_maybenull_ ITextRangeProvider*
     return S_OK;
 }
 
-IFACEMETHODIMP UiaTextRange::FindText(_In_ BSTR /*text*/,
-                                      _In_ BOOL /*searchBackward*/,
-                                      _In_ BOOL /*ignoreCase*/,
-                                      _Outptr_result_maybenull_ ITextRangeProvider** /*ppRetVal*/)
+void UiaTextRange::_ChangeViewport(const SMALL_RECT NewWindow)
 {
-    // TODO GitHub #605: Search functionality
-    return E_NOTIMPL;
-}
-
-void UiaTextRange::_ChangeViewport(const SMALL_RECT /*NewWindow*/)
-{
-    // TODO GitHub #2361: Update viewport when calling UiaTextRangeBase::ScrollIntoView()
+    auto provider = static_cast<TermControlUiaProvider*>(_pProvider);
+    provider->ChangeViewport(NewWindow);
 }
 
 // Method Description:
@@ -132,21 +95,59 @@ void UiaTextRange::_TranslatePointToScreen(LPPOINT clientPoint) const
 {
     auto provider = static_cast<TermControlUiaProvider*>(_pProvider);
 
+    auto includeOffsets = [](long clientPos, double termControlPos, double padding, double scaleFactor) {
+        auto result = base::ClampedNumeric<double>(clientPos);
+        result += padding;
+        result *= scaleFactor;
+        result += termControlPos;
+        return result;
+    };
+
     // update based on TermControl location (important for Panes)
     UiaRect boundingRect;
     THROW_IF_FAILED(provider->get_BoundingRectangle(&boundingRect));
-    clientPoint->x += gsl::narrow<LONG>(boundingRect.left);
-    clientPoint->y += gsl::narrow<LONG>(boundingRect.top);
 
     // update based on TermControl padding
-    auto padding = provider->GetPadding();
-    clientPoint->x += gsl::narrow<LONG>(padding.Left);
-    clientPoint->y += gsl::narrow<LONG>(padding.Top);
+    const auto padding = provider->GetPadding();
+
+    // Get scale factor for display
+    const auto scaleFactor = DisplayInformation::GetForCurrentView().RawPixelsPerViewPixel();
+
+    clientPoint->x = includeOffsets(clientPoint->x, boundingRect.left, padding.Left, scaleFactor);
+    clientPoint->y = includeOffsets(clientPoint->y, boundingRect.top, padding.Top, scaleFactor);
 }
 
-void UiaTextRange::_TranslatePointFromScreen(LPPOINT /*screenPoint*/) const
+// Method Description:
+// - Transform coordinates relative to the screen to relative to the client
+// Arguments:
+// - screenPoint: coordinates relative to the screen where
+//                (0,0) is the top-left of the screen
+// Return Value:
+// - <none>
+void UiaTextRange::_TranslatePointFromScreen(LPPOINT screenPoint) const
 {
-    // TODO GitHub #2103: NON-HWND IMPLEMENTATION OF SCREENTOCLIENT()
+    auto provider = static_cast<TermControlUiaProvider*>(_pProvider);
+
+    auto includeOffsets = [](long screenPos, double termControlPos, double padding, double scaleFactor) {
+        auto result = base::ClampedNumeric<double>(screenPos);
+        result -= termControlPos;
+        result /= scaleFactor;
+        result -= padding;
+        return result;
+    };
+
+    // update based on TermControl location (important for Panes)
+    UiaRect boundingRect;
+    THROW_IF_FAILED(provider->get_BoundingRectangle(&boundingRect));
+
+    // update based on TermControl padding
+    const auto padding = provider->GetPadding();
+
+    // Get scale factor for display
+    const auto scaleFactor = DisplayInformation::GetForCurrentView().RawPixelsPerViewPixel();
+
+    screenPoint->x = includeOffsets(screenPoint->x, boundingRect.left, padding.Left, scaleFactor);
+    screenPoint->y = includeOffsets(screenPoint->y, boundingRect.top, padding.Top, scaleFactor);
 }
 
 const COORD UiaTextRange::_getScreenFontSize() const
