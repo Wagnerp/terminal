@@ -34,6 +34,7 @@ namespace TerminalAppLocalTests
 namespace TerminalAppUnitTests
 {
     class DynamicProfileTests;
+    class JsonTests;
 };
 
 namespace TerminalApp
@@ -45,7 +46,7 @@ class TerminalApp::CascadiaSettings final
 {
 public:
     CascadiaSettings();
-    CascadiaSettings(const bool addDynamicProfiles);
+    explicit CascadiaSettings(const bool addDynamicProfiles);
 
     static std::unique_ptr<CascadiaSettings> LoadDefaults();
     static std::unique_ptr<CascadiaSettings> LoadAll();
@@ -58,18 +59,18 @@ public:
 
     GlobalAppSettings& GlobalSettings();
 
-    std::basic_string_view<Profile> GetProfiles() const noexcept;
+    gsl::span<const Profile> GetProfiles() const noexcept;
 
     winrt::TerminalApp::AppKeyBindings GetKeybindings() const noexcept;
 
     static std::unique_ptr<CascadiaSettings> FromJson(const Json::Value& json);
     void LayerJson(const Json::Value& json);
 
-    static std::wstring GetSettingsPath(const bool useRoamingPath = false);
-    static std::wstring GetDefaultSettingsPath();
+    static std::filesystem::path GetSettingsPath();
+    static std::filesystem::path GetDefaultSettingsPath();
 
-    std::optional<GUID> FindGuid(const std::wstring& profileName) const noexcept;
     const Profile* FindProfile(GUID profileGuid) const noexcept;
+    const ColorScheme* GetColorSchemeForProfile(const GUID profileGuid) const;
 
     std::vector<TerminalApp::SettingsLoadWarnings>& GetWarnings();
 
@@ -94,6 +95,7 @@ private:
     static const Json::Value& _GetDisabledProfileSourcesJsonObject(const Json::Value& json);
     bool _PrependSchemaDirective();
     bool _AppendDynamicProfilesToUserSettings();
+    std::string _ApplyFirstRunChangesToSettingsTemplate(std::string_view settingsTemplate) const;
 
     void _ApplyDefaultsFromUserSettings();
 
@@ -104,7 +106,8 @@ private:
     static std::optional<std::string> _ReadUserSettings();
     static std::optional<std::string> _ReadFile(HANDLE hFile);
 
-    GUID _GetProfileForIndex(std::optional<int> index) const;
+    std::optional<GUID> _GetProfileGuidByName(const std::wstring_view) const;
+    std::optional<GUID> _GetProfileGuidByIndex(std::optional<int> index) const;
     GUID _GetProfileForArgs(const winrt::TerminalApp::NewTerminalArgs& newTerminalArgs) const;
 
     void _ValidateSettings();
@@ -112,10 +115,13 @@ private:
     void _ValidateProfilesHaveGuid();
     void _ValidateDefaultProfileExists();
     void _ValidateNoDuplicateProfiles();
+    void _ResolveDefaultProfile();
     void _ReorderProfilesToMatchUserSettingsOrder();
     void _RemoveHiddenProfiles();
     void _ValidateAllSchemesExist();
     void _ValidateMediaResources();
+    void _ValidateKeybindings();
+    void _ValidateNoGlobalsKey();
 
     friend class TerminalAppLocalTests::SettingsTests;
     friend class TerminalAppLocalTests::ProfileTests;
@@ -123,4 +129,5 @@ private:
     friend class TerminalAppLocalTests::KeyBindingsTests;
     friend class TerminalAppLocalTests::TabTests;
     friend class TerminalAppUnitTests::DynamicProfileTests;
+    friend class TerminalAppUnitTests::JsonTests;
 };

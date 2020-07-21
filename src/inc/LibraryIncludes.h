@@ -38,7 +38,7 @@
 #include <vector>
 #include <unordered_map>
 #include <iterator>
-#include <math.h>
+#include <cmath>
 #include <sstream>
 #include <fstream>
 #include <iomanip>
@@ -64,6 +64,7 @@
 #ifndef BLOCK_GSL
 #define GSL_MULTI_SPAN_H
 #include <gsl/gsl>
+#include <gsl/span_ext>
 #endif
 
 // CppCoreCheck
@@ -79,14 +80,35 @@
 #define ENABLE_INTSAFE_SIGNED_FUNCTIONS
 #include <intsafe.h>
 
+// LibPopCnt - Fast C/C++ bit population count library (on bits in an array)
+#include <libpopcnt.h>
+
+// Dynamic Bitset (optional dependency on LibPopCnt for perf at bit counting)
+// Variable-size compressed-storage header-only bit flag storage library.
+#pragma warning(push)
+#pragma warning(disable:4702) // unreachable code
+#include <dynamic_bitset.hpp>
+#pragma warning(pop)
+
+// {fmt}, a C++20-compatible formatting library
+#include <fmt/format.h>
+
 // SAL
 #include <sal.h>
 
 // WRL
 #include <wrl.h>
 
+// WEX/TAEF testing
+// Include before TIL if we're unit testing so it can light up WEX/TAEF template extensions
+#ifdef UNIT_TESTING
+#include <WexTestClass.h>
+#endif
+
 // TIL - Terminal Implementation Library
+#ifndef BLOCK_TIL // Certain projects may want to include TIL manually to gain superpowers
 #include "til.h"
+#endif
 
 #pragma warning(pop)
 

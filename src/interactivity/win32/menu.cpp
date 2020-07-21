@@ -45,22 +45,20 @@ Menu::Menu(HMENU hMenu, HMENU hHeirMenu) :
 [[nodiscard]] NTSTATUS Menu::CreateInstance(HWND hWnd)
 {
     NTSTATUS status = STATUS_SUCCESS;
-    HMENU hMenu = nullptr;
-    HMENU hHeirMenu = nullptr;
 
-    int ItemLength;
     WCHAR ItemString[32];
 
     // This gets the title bar menu.
-    hMenu = GetSystemMenu(hWnd, FALSE);
-    hHeirMenu = LoadMenuW(ServiceLocator::LocateGlobals().hInstance,
-                          MAKEINTRESOURCE(ID_CONSOLE_SYSTEMMENU));
+    HMENU hMenu = GetSystemMenu(hWnd, FALSE);
+    HMENU hHeirMenu = LoadMenuW(ServiceLocator::LocateGlobals().hInstance,
+                                MAKEINTRESOURCE(ID_CONSOLE_SYSTEMMENU));
 
     Menu* pNewMenu = new (std::nothrow) Menu(hMenu, hHeirMenu);
     status = NT_TESTNULL(pNewMenu);
 
     if (NT_SUCCESS(status))
     {
+        int ItemLength;
         // Load the submenu to the system menu.
         if (hHeirMenu)
         {
@@ -248,7 +246,7 @@ void Menu::s_ShowPropertiesDialog(HWND const hwnd, BOOL const Defaults)
     UnlockConsole();
 
     // First try to find the console.dll next to the launched exe, else default to /windows/system32/console.dll
-    HANDLE hLibrary = LoadLibraryExW(gwszRelativePropertiesDll, 0, 0);
+    HANDLE hLibrary = LoadLibraryExW(gwszRelativePropertiesDll, nullptr, 0);
     bool fLoadedDll = hLibrary != nullptr;
     if (!fLoadedDll)
     {
@@ -260,7 +258,7 @@ void Menu::s_ShowPropertiesDialog(HWND const hwnd, BOOL const Defaults)
             {
                 wszFilePath[ARRAYSIZE(wszFilePath) - 1] = UNICODE_NULL;
 
-                hLibrary = LoadLibraryExW(wszFilePath, 0, LOAD_WITH_ALTERED_SEARCH_PATH);
+                hLibrary = LoadLibraryExW(wszFilePath, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
                 fLoadedDll = hLibrary != nullptr;
             }
         }
@@ -337,7 +335,10 @@ void Menu::s_ShowPropertiesDialog(HWND const hwnd, BOOL const Defaults)
     pStateInfo->NumberOfHistoryBuffers = gci.GetNumberOfHistoryBuffers();
     pStateInfo->HistoryNoDup = !!(gci.Flags & CONSOLE_HISTORY_NODUP);
 
-    memmove(pStateInfo->ColorTable, gci.GetColorTable(), gci.GetColorTableSize() * sizeof(COLORREF));
+    for (size_t i = 0; i < std::size(pStateInfo->ColorTable); i++)
+    {
+        pStateInfo->ColorTable[i] = gci.GetColorTableEntry(i);
+    }
 
     // Create mutable copies of the titles so the propsheet can do something with them.
     if (gci.GetOriginalTitle().length() > 0)
@@ -374,8 +375,7 @@ void Menu::s_ShowPropertiesDialog(HWND const hwnd, BOOL const Defaults)
 
     pStateInfo->InterceptCopyPaste = gci.GetInterceptCopyPaste();
 
-    // Get the properties from the settings - CONSOLE_INFORMATION overloads
-    //  these methods to implement IDefaultColorProvider
+    // Get the properties from the settings
     pStateInfo->DefaultForeground = gci.GetDefaultForegroundColor();
     pStateInfo->DefaultBackground = gci.GetDefaultBackgroundColor();
 
@@ -564,7 +564,10 @@ void Menu::s_PropertiesUpdate(PCONSOLE_STATE_INFO pStateInfo)
         }
     }
 
-    gci.SetColorTable(pStateInfo->ColorTable, gci.GetColorTableSize());
+    for (size_t i = 0; i < std::size(pStateInfo->ColorTable); i++)
+    {
+        gci.SetColorTableEntry(i, pStateInfo->ColorTable[i]);
+    }
 
     // Ensure that attributes only contain color specification.
     WI_ClearAllFlags(pStateInfo->ScreenAttributes, ~(FG_ATTRS | BG_ATTRS));
@@ -579,8 +582,11 @@ void Menu::s_PropertiesUpdate(PCONSOLE_STATE_INFO pStateInfo)
     gci.SetDefaultForegroundColor(pStateInfo->DefaultForeground);
     gci.SetDefaultBackgroundColor(pStateInfo->DefaultBackground);
 
+    // Make sure the updated fill attributes are passed on to the TextAttribute class.
+    TextAttribute::SetLegacyDefaultAttributes(pStateInfo->ScreenAttributes);
+
     // Set the screen info's default text attributes to defaults -
-    ScreenInfo.SetDefaultAttributes(gci.GetDefaultAttributes(), { gci.GetPopupFillAttribute() });
+    ScreenInfo.SetDefaultAttributes({}, TextAttribute{ gci.GetPopupFillAttribute() });
 
     CommandHistory::s_ResizeAll(pStateInfo->HistoryBufferSize);
     gci.SetNumberOfHistoryBuffers(pStateInfo->NumberOfHistoryBuffers);

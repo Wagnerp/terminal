@@ -35,7 +35,6 @@ CONSOLE_INFORMATION::CONSOLE_INFORMATION() :
     // OutputCPInfo initialized below
     _cookedReadData(nullptr),
     ConsoleIme{},
-    terminalMouseInput(HandleTerminalKeyEventCallback),
     _vtIo(),
     _blinker{},
     renderData{}
@@ -178,18 +177,6 @@ COOKED_READ_DATA& CONSOLE_INFORMATION::CookedReadData() noexcept
 void CONSOLE_INFORMATION::SetCookedReadData(COOKED_READ_DATA* readData) noexcept
 {
     _cookedReadData = readData;
-}
-
-// Routine Description:
-// - Handler for inserting key sequences into the buffer when the terminal emulation layer
-//   has determined a key can be converted appropriately into a sequence of inputs
-// Arguments:
-// - events - the input events to write to the input buffer
-// Return Value:
-// - <none>
-void CONSOLE_INFORMATION::HandleTerminalKeyEventCallback(_Inout_ std::deque<std::unique_ptr<IInputEvent>>& events)
-{
-    ServiceLocator::LocateGlobals().getConsoleInformation().pInputBuffer->Write(events);
 }
 
 // Method Description:
@@ -369,8 +356,8 @@ Microsoft::Console::CursorBlinker& CONSOLE_INFORMATION::GetCursorBlinker() noexc
 }
 
 // Method Description:
-// - Generates a CHAR_INFO for this output cell, using our
-//      GenerateLegacyAttributes method to generate the legacy style attributes.
+// - Generates a CHAR_INFO for this output cell, using the TextAttribute
+//      GetLegacyAttributes method to generate the legacy style attributes.
 // Arguments:
 // - cell: The cell to get the CHAR_INFO from
 // Return Value:
@@ -384,8 +371,7 @@ CHAR_INFO CONSOLE_INFORMATION::AsCharInfo(const OutputCellView& cell) const noex
     //    use gci to look up the correct legacy attributes to use
     //    (for mapping RGB values to the nearest table value)
     const auto& attr = cell.TextAttr();
-    ci.Attributes = GenerateLegacyAttributes(attr);
-    ;
+    ci.Attributes = attr.GetLegacyAttributes();
     ci.Attributes |= cell.DbcsAttr().GeneratePublicApiAttributeFormat();
     return ci;
 }

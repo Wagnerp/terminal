@@ -4,27 +4,26 @@
 #include "precomp.h"
 
 #include "ScreenInfoUiaProviderBase.h"
-#include "WindowUiaProviderBase.hpp"
 #include "UiaTracing.h"
 
 using namespace Microsoft::Console::Types;
 
 // A helper function to create a SafeArray Version of an int array of a specified length
-SAFEARRAY* BuildIntSafeArray(std::basic_string_view<int> data)
+SAFEARRAY* BuildIntSafeArray(gsl::span<const int> data)
 {
     SAFEARRAY* psa = SafeArrayCreateVector(VT_I4, 0, gsl::narrow<ULONG>(data.size()));
     if (psa != nullptr)
     {
-        for (size_t i = 0; i < data.size(); i++)
+        LONG lIndex{ 0 };
+        for (auto val : data)
         {
-            LONG lIndex = 0;
-            if (FAILED(SizeTToLong(i, &lIndex) ||
-                       FAILED(SafeArrayPutElement(psa, &lIndex, (void*)&(data.at(i))))))
+            if (FAILED(SafeArrayPutElement(psa, &lIndex, (void*)&val)))
             {
                 SafeArrayDestroy(psa);
                 psa = nullptr;
                 break;
             }
+            ++lIndex;
         }
     }
 
@@ -38,30 +37,31 @@ try
     RETURN_HR_IF_NULL(E_INVALIDARG, pData);
     _pData = pData;
     _wordDelimiters = wordDelimiters;
+
     UiaTracing::TextProvider::Constructor(*this);
     return S_OK;
 }
 CATCH_RETURN();
 
-[[nodiscard]] HRESULT ScreenInfoUiaProviderBase::Signal(_In_ EVENTID id)
+[[nodiscard]] HRESULT ScreenInfoUiaProviderBase::Signal(_In_ EVENTID eventId)
 {
     HRESULT hr = S_OK;
     // check to see if we're already firing this particular event
-    if (_signalFiringMapping.find(id) != _signalFiringMapping.end() &&
-        _signalFiringMapping[id] == true)
+    if (_signalFiringMapping.find(eventId) != _signalFiringMapping.end() &&
+        _signalFiringMapping[eventId] == true)
     {
         return hr;
     }
 
     try
     {
-        _signalFiringMapping[id] = true;
+        _signalFiringMapping[eventId] = true;
     }
     CATCH_RETURN();
 
     IRawElementProviderSimple* pProvider = this;
-    hr = UiaRaiseAutomationEvent(pProvider, id);
-    _signalFiringMapping[id] = false;
+    hr = UiaRaiseAutomationEvent(pProvider, eventId);
+    _signalFiringMapping[eventId] = false;
 
     return hr;
 }
@@ -191,7 +191,7 @@ IFACEMETHODIMP ScreenInfoUiaProviderBase::GetRuntimeId(_Outptr_result_maybenull_
     // AppendRuntimeId is a magic Number that tells UIAutomation to Append its own Runtime ID(From the HWND)
     const std::array<int, 2> rId{ UiaAppendRuntimeId, -1 };
 
-    const std::basic_string_view<int> span{ rId.data(), rId.size() };
+    const gsl::span<const int> span{ rId.data(), rId.size() };
     // BuildIntSafeArray is a custom function to hide the SafeArray creation
     *ppRuntimeId = BuildIntSafeArray(span);
     RETURN_IF_NULL_ALLOC(*ppRuntimeId);
@@ -256,6 +256,8 @@ IFACEMETHODIMP ScreenInfoUiaProviderBase::GetSelection(_Outptr_result_maybenull_
         return hr;
     }
 
+    UiaTracing::TextProvider::GetSelection(*this, *range.Get());
+
     LONG currentIndex = 0;
     hr = SafeArrayPutElement(*ppRetVal, &currentIndex, range.Detach());
     if (FAILED(hr))
@@ -265,7 +267,6 @@ IFACEMETHODIMP ScreenInfoUiaProviderBase::GetSelection(_Outptr_result_maybenull_
         return hr;
     }
 
-    UiaTracing::TextProvider::GetSelection(*this);
     return S_OK;
 }
 
@@ -367,7 +368,7 @@ IFACEMETHODIMP ScreenInfoUiaProviderBase::get_SupportedTextSelection(_Out_ Suppo
 
 #pragma endregion
 
-const COORD ScreenInfoUiaProviderBase::_getScreenBufferCoords() const
+const COORD ScreenInfoUiaProviderBase::_getScreenBufferCoords() const noexcept
 {
     return _getTextBuffer().GetSize().Dimensions();
 }

@@ -15,6 +15,7 @@ Author(s):
 --*/
 #pragma once
 #include "ColorScheme.h"
+#include "SettingsTypes.h"
 
 // fwdecl unittest classes
 namespace TerminalAppLocalTests
@@ -35,27 +36,18 @@ constexpr GUID RUNTIME_GENERATED_PROFILE_NAMESPACE_GUID = { 0xf65ddb7e, 0x706b, 
 namespace TerminalApp
 {
     class Profile;
-
-    enum class CloseOnExitMode
-    {
-        Never = 0,
-        Graceful,
-        Always
-    };
-};
+}
 
 class TerminalApp::Profile final
 {
 public:
     Profile();
-    Profile(const std::optional<GUID>& guid);
+    explicit Profile(const std::optional<GUID>& guid);
 
     ~Profile();
 
     winrt::Microsoft::Terminal::Settings::TerminalSettings CreateTerminalSettings(const std::unordered_map<std::wstring, ColorScheme>& schemes) const;
 
-    Json::Value ToJson() const;
-    Json::Value DiffToJson(const Profile& other) const;
     Json::Value GenerateStub() const;
     static Profile FromJson(const Json::Value& json);
     bool ShouldBeLayered(const Json::Value& json) const;
@@ -73,17 +65,17 @@ public:
     void SetGuid(GUID guid) noexcept { _guid = guid; }
     void SetFontFace(std::wstring fontFace) noexcept;
     void SetColorScheme(std::optional<std::wstring> schemeName) noexcept;
-    std::optional<std::wstring>& GetSchemeName() noexcept;
+    const std::optional<std::wstring>& GetSchemeName() const noexcept;
     void SetTabTitle(std::wstring tabTitle) noexcept;
     void SetSuppressApplicationTitle(bool suppressApplicationTitle) noexcept;
     void SetAcrylicOpacity(double opacity) noexcept;
     void SetCommandline(std::wstring cmdline) noexcept;
     void SetStartingDirectory(std::wstring startingDirectory) noexcept;
-    void SetName(std::wstring name) noexcept;
+    void SetName(const std::wstring_view name) noexcept;
     void SetUseAcrylic(bool useAcrylic) noexcept;
-    void SetDefaultForeground(COLORREF defaultForeground) noexcept;
-    void SetDefaultBackground(COLORREF defaultBackground) noexcept;
-    void SetSelectionBackground(COLORREF selectionBackground) noexcept;
+    void SetDefaultForeground(til::color defaultForeground) noexcept;
+    void SetDefaultBackground(til::color defaultBackground) noexcept;
+    void SetSelectionBackground(til::color selectionBackground) noexcept;
     void SetCloseOnExitMode(CloseOnExitMode mode) noexcept;
     void SetConnectionType(GUID connectionType) noexcept;
 
@@ -109,23 +101,7 @@ public:
 private:
     static std::wstring EvaluateStartingDirectory(const std::wstring& directory);
 
-    static winrt::Microsoft::Terminal::Settings::ScrollbarState ParseScrollbarState(const std::wstring& scrollbarState);
-    static winrt::Windows::UI::Xaml::Media::Stretch ParseImageStretchMode(const std::string_view imageStretchMode);
-    static winrt::Windows::UI::Xaml::Media::Stretch _ConvertJsonToStretchMode(const Json::Value& json);
-    static std::string_view SerializeImageStretchMode(const winrt::Windows::UI::Xaml::Media::Stretch imageStretchMode);
-    static std::tuple<winrt::Windows::UI::Xaml::HorizontalAlignment, winrt::Windows::UI::Xaml::VerticalAlignment> ParseImageAlignment(const std::string_view imageAlignment);
-    static std::tuple<winrt::Windows::UI::Xaml::HorizontalAlignment, winrt::Windows::UI::Xaml::VerticalAlignment> _ConvertJsonToAlignment(const Json::Value& json);
-
-    static CloseOnExitMode ParseCloseOnExitMode(const Json::Value& json);
-    static std::string_view _SerializeCloseOnExitMode(const CloseOnExitMode closeOnExitMode);
-
-    static std::string_view SerializeImageAlignment(const std::tuple<winrt::Windows::UI::Xaml::HorizontalAlignment, winrt::Windows::UI::Xaml::VerticalAlignment> imageAlignment);
-    static winrt::Microsoft::Terminal::Settings::CursorStyle _ParseCursorShape(const std::wstring& cursorShapeString);
-    static std::wstring_view _SerializeCursorStyle(const winrt::Microsoft::Terminal::Settings::CursorStyle cursorShape);
-
     static GUID _GenerateGuidForProfile(const std::wstring& name, const std::optional<std::wstring>& source) noexcept;
-
-    static bool _ConvertJsonToBool(const Json::Value& json);
 
     std::optional<GUID> _guid{ std::nullopt };
     std::optional<std::wstring> _source{ std::nullopt };
@@ -136,15 +112,15 @@ private:
     // If this is set, then our colors should come from the associated color scheme
     std::optional<std::wstring> _schemeName;
 
-    std::optional<uint32_t> _defaultForeground;
-    std::optional<uint32_t> _defaultBackground;
-    std::optional<uint32_t> _selectionBackground;
-    std::array<uint32_t, COLOR_TABLE_SIZE> _colorTable;
+    std::optional<til::color> _defaultForeground;
+    std::optional<til::color> _defaultBackground;
+    std::optional<til::color> _selectionBackground;
+    std::optional<til::color> _cursorColor;
     std::optional<std::wstring> _tabTitle;
     bool _suppressApplicationTitle;
     int32_t _historySize;
     bool _snapOnInput;
-    uint32_t _cursorColor;
+    bool _altGrAliasing;
     uint32_t _cursorHeight;
     winrt::Microsoft::Terminal::Settings::CursorStyle _cursorShape;
 
@@ -152,6 +128,7 @@ private:
     std::wstring _fontFace;
     std::optional<std::wstring> _startingDirectory;
     int32_t _fontSize;
+    winrt::Windows::UI::Text::FontWeight _fontWeight;
     double _acrylicTransparency;
     bool _useAcrylic;
 
@@ -160,11 +137,13 @@ private:
     std::optional<winrt::Windows::UI::Xaml::Media::Stretch> _backgroundImageStretchMode;
     std::optional<std::tuple<winrt::Windows::UI::Xaml::HorizontalAlignment, winrt::Windows::UI::Xaml::VerticalAlignment>> _backgroundImageAlignment;
 
-    std::optional<std::wstring> _scrollbarState;
+    std::optional<::winrt::Microsoft::Terminal::Settings::ScrollbarState> _scrollbarState;
     CloseOnExitMode _closeOnExitMode;
     std::wstring _padding;
 
     std::optional<std::wstring> _icon;
+
+    winrt::Microsoft::Terminal::Settings::TextAntialiasingMode _antialiasingMode;
 
     friend class TerminalAppLocalTests::SettingsTests;
     friend class TerminalAppLocalTests::ProfileTests;

@@ -3,7 +3,7 @@
 
 #include "precomp.h"
 
-#include "..\types\WindowUiaProviderBase.hpp"
+#include "windowUiaProvider.hpp"
 #include "screenInfoUiaProvider.hpp"
 
 using namespace Microsoft::Console::Types;
@@ -13,7 +13,7 @@ using namespace Microsoft::Console::Interactivity::Win32;
 using namespace Microsoft::WRL;
 
 HRESULT ScreenInfoUiaProvider::RuntimeClassInitialize(_In_ Microsoft::Console::Types::IUiaData* pData,
-                                                      _In_ Microsoft::Console::Types::WindowUiaProviderBase* const pUiaParent)
+                                                      _In_ WindowUiaProvider* const pUiaParent)
 {
     RETURN_HR_IF_NULL(E_INVALIDARG, pUiaParent);
     RETURN_HR_IF_NULL(E_INVALIDARG, pData);
@@ -105,12 +105,12 @@ HRESULT ScreenInfoUiaProvider::GetSelectionRange(_In_ IRawElementProviderSimple*
     const auto start = _pData->GetSelectionAnchor();
 
     // we need to make end exclusive
-    auto end = _pData->GetEndSelectionPosition();
+    auto end = _pData->GetSelectionEnd();
     _pData->GetTextBuffer().GetSize().IncrementInBounds(end, true);
 
     // TODO GH #4509: Box Selection is misrepresented here as a line selection.
     UiaTextRange* result;
-    RETURN_IF_FAILED(MakeAndInitialize<UiaTextRange>(&result, _pData, pProvider, start, end, wordDelimiters));
+    RETURN_IF_FAILED(MakeAndInitialize<UiaTextRange>(&result, _pData, pProvider, start, end, _pData->IsBlockSelection(), wordDelimiters));
     *ppUtr = result;
     return S_OK;
 }
@@ -147,7 +147,7 @@ HRESULT ScreenInfoUiaProvider::CreateTextRange(_In_ IRawElementProviderSimple* c
     RETURN_HR_IF_NULL(E_INVALIDARG, ppUtr);
     *ppUtr = nullptr;
     UiaTextRange* result = nullptr;
-    RETURN_IF_FAILED(MakeAndInitialize<UiaTextRange>(&result, _pData, pProvider, start, end, wordDelimiters));
+    RETURN_IF_FAILED(MakeAndInitialize<UiaTextRange>(&result, _pData, pProvider, start, end, false, wordDelimiters));
     *ppUtr = result;
     return S_OK;
 }

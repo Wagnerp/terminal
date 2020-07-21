@@ -24,6 +24,8 @@
     <ClCompile Include="..\ThemeUtils.cpp" />
     <ClCompile Include="..\UiaTextRangeBase.cpp" />
     <ClCompile Include="..\UiaTracing.cpp" />
+    <ClCompile Include="..\TermControlUiaTextRange.cpp" />
+    <ClCompile Include="..\TermControlUiaProvider.cpp" />
     <ClCompile Include="..\Utf16Parser.cpp" />
     <ClCompile Include="..\Viewport.cpp" />
     <ClCompile Include="..\WindowBufferSizeEvent.cpp" />
@@ -31,11 +33,10 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\utils.cpp" />
-    <ClCompile Include="..\WindowUiaProviderBase.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\IBaseData.h" />
-    <ClInclude Include="..\IConsoleWindow.hpp" />
+    <ClInclude Include="..\IControlAccessibilityInfo.h" />
     <ClInclude Include="..\inc\CodepointWidthDetector.hpp" />
     <ClInclude Include="..\inc\convert.hpp" />
     <ClInclude Include="..\inc\Environment.hpp" />
@@ -47,12 +48,19 @@
     <ClInclude Include="..\inc\Utf16Parser.hpp" />
     <ClInclude Include="..\IUiaData.h" />
     <ClInclude Include="..\IUiaEventDispatcher.h" />
-    <ClInclude Include="..\IUiaWindow.h" />
+    <ClInclude Include="..\IUiaTraceable.h" />
+    <ClInclude Include="..\TermControlUiaTextRange.hpp" />
+    <ClInclude Include="..\TermControlUiaProvider.hpp" />
     <ClInclude Include="..\precomp.h" />
     <ClInclude Include="..\ScreenInfoUiaProviderBase.h" />
     <ClInclude Include="..\UiaTextRangeBase.hpp" />
     <ClInclude Include="..\UiaTracing.h" />
-    <ClInclude Include="..\WindowUiaProviderBase.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- subsume fmt, one of our dependencies, into contypes. -->
+    <ProjectReference Include="..\..\dep\fmt\fmt.vcxproj">
+      <Project>{6bae5851-50d5-4934-8d5e-30361a8a40f3}</Project>
+    </ProjectReference>
   </ItemGroup>
   <!-- Careful reordering these. Some default props (contained in these files) are order sensitive. -->
   <Import Project="$(SolutionDir)src\common.build.post.props" />

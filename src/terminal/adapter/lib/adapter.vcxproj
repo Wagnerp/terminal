@@ -14,7 +14,6 @@
     <ClCompile Include="..\DispatchCommon.cpp" />
     <ClCompile Include="..\InteractDispatch.cpp" />
     <ClCompile Include="..\adaptDispatchGraphics.cpp" />
-    <ClCompile Include="..\MouseInput.cpp" />
     <ClCompile Include="..\telemetry.cpp" />
     <ClCompile Include="..\terminalOutput.cpp" />
     <ClCompile Include="..\tracing.cpp" />
@@ -25,11 +24,11 @@
   <ItemGroup>
     <ClInclude Include="..\adaptDefaults.hpp" />
     <ClInclude Include="..\adaptDispatch.hpp" />
+    <ClInclude Include="..\charsets.hpp" />
     <ClInclude Include="..\DispatchTypes.hpp" />
     <ClInclude Include="..\DispatchCommon.hpp" />
     <ClInclude Include="..\InteractDispatch.hpp" />
     <ClInclude Include="..\conGetSet.hpp" />
-    <ClInclude Include="..\MouseInput.hpp" />
     <ClInclude Include="..\precomp.h" />
     <ClInclude Include="..\telemetry.hpp" />
     <ClInclude Include="..\terminalOutput.hpp" />

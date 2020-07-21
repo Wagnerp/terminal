@@ -5,7 +5,7 @@
 #include <wextestclass.h>
 #include "..\..\inc\consoletaeftemplates.hpp"
 
-#include "MouseInput.hpp"
+#include "..\terminal\input\terminalInput.hpp"
 
 using namespace WEX::Common;
 using namespace WEX::Logging;
@@ -280,7 +280,7 @@ public:
 
         Log::Comment(L"Starting test...");
 
-        std::unique_ptr<MouseInput> mouseInput = std::make_unique<MouseInput>(s_MouseInputTestCallback);
+        std::unique_ptr<TerminalInput> mouseInput = std::make_unique<TerminalInput>(s_MouseInputTestCallback);
 
         unsigned int uiModifierKeystate = 0;
         VERIFY_SUCCEEDED_RETURN(TestData::TryGetValue(L"uiModifierKeystate", uiModifierKeystate));
@@ -359,7 +359,7 @@ public:
 
         Log::Comment(L"Starting test...");
 
-        std::unique_ptr<MouseInput> mouseInput = std::make_unique<MouseInput>(s_MouseInputTestCallback);
+        std::unique_ptr<TerminalInput> mouseInput = std::make_unique<TerminalInput>(s_MouseInputTestCallback);
 
         unsigned int uiModifierKeystate = 0;
         VERIFY_SUCCEEDED_RETURN(TestData::TryGetValue(L"uiModifierKeystate", uiModifierKeystate));
@@ -442,7 +442,7 @@ public:
 
         Log::Comment(L"Starting test...");
 
-        std::unique_ptr<MouseInput> mouseInput = std::make_unique<MouseInput>(s_MouseInputTestCallback);
+        std::unique_ptr<TerminalInput> mouseInput = std::make_unique<TerminalInput>(s_MouseInputTestCallback);
         unsigned int uiModifierKeystate = 0;
         VERIFY_SUCCEEDED_RETURN(TestData::TryGetValue(L"uiModifierKeystate", uiModifierKeystate));
         short sModifierKeystate = (SHORT)uiModifierKeystate;
@@ -514,13 +514,13 @@ public:
     TEST_METHOD(ScrollWheelTests)
     {
         BEGIN_TEST_METHOD_PROPERTIES()
-            TEST_METHOD_PROPERTY(L"Data:sScrollDelta", L"{0, -1, 1, 100, -10000, 32736}")
+            TEST_METHOD_PROPERTY(L"Data:sScrollDelta", L"{-120, 120, -10000, 32736}")
             TEST_METHOD_PROPERTY(L"Data:uiModifierKeystate", L"{0x0000, 0x0004, 0x0008}")
         END_TEST_METHOD_PROPERTIES()
 
         Log::Comment(L"Starting test...");
 
-        std::unique_ptr<MouseInput> mouseInput = std::make_unique<MouseInput>(s_MouseInputTestCallback);
+        std::unique_ptr<TerminalInput> mouseInput = std::make_unique<TerminalInput>(s_MouseInputTestCallback);
         unsigned int uiModifierKeystate = 0;
         VERIFY_SUCCEEDED_RETURN(TestData::TryGetValue(L"uiModifierKeystate", uiModifierKeystate));
         short sModifierKeystate = (SHORT)uiModifierKeystate;
@@ -592,5 +592,45 @@ public:
                                                      sScrollDelta),
                              NoThrowString().Format(L"(x,y)=(%d,%d)", Coord.X, Coord.Y));
         }
+    }
+
+    TEST_METHOD(AlternateScrollModeTests)
+    {
+        Log::Comment(L"Starting test...");
+        std::unique_ptr<TerminalInput> mouseInput = std::make_unique<TerminalInput>(s_MouseInputTestCallback);
+        const short noModifierKeys = 0;
+
+        Log::Comment(L"Enable alternate scroll mode in the alt screen buffer");
+        mouseInput->UseAlternateScreenBuffer();
+        mouseInput->EnableAlternateScroll(true);
+
+        Log::Comment(L"Test mouse wheel scrolling up");
+        s_pwszInputExpected = L"\x1B[A";
+        VERIFY_IS_TRUE(mouseInput->HandleMouse({ 0, 0 }, WM_MOUSEWHEEL, noModifierKeys, WHEEL_DELTA));
+
+        Log::Comment(L"Test mouse wheel scrolling down");
+        s_pwszInputExpected = L"\x1B[B";
+        VERIFY_IS_TRUE(mouseInput->HandleMouse({ 0, 0 }, WM_MOUSEWHEEL, noModifierKeys, -WHEEL_DELTA));
+
+        Log::Comment(L"Enable cursor keys mode");
+        mouseInput->ChangeCursorKeysMode(true);
+
+        Log::Comment(L"Test mouse wheel scrolling up");
+        s_pwszInputExpected = L"\x1BOA";
+        VERIFY_IS_TRUE(mouseInput->HandleMouse({ 0, 0 }, WM_MOUSEWHEEL, noModifierKeys, WHEEL_DELTA));
+
+        Log::Comment(L"Test mouse wheel scrolling down");
+        s_pwszInputExpected = L"\x1BOB";
+        VERIFY_IS_TRUE(mouseInput->HandleMouse({ 0, 0 }, WM_MOUSEWHEEL, noModifierKeys, -WHEEL_DELTA));
+
+        Log::Comment(L"Confirm no effect when scroll mode is disabled");
+        mouseInput->UseAlternateScreenBuffer();
+        mouseInput->EnableAlternateScroll(false);
+        VERIFY_IS_FALSE(mouseInput->HandleMouse({ 0, 0 }, WM_MOUSEWHEEL, noModifierKeys, WHEEL_DELTA));
+
+        Log::Comment(L"Confirm no effect when using the main buffer");
+        mouseInput->UseMainScreenBuffer();
+        mouseInput->EnableAlternateScroll(true);
+        VERIFY_IS_FALSE(mouseInput->HandleMouse({ 0, 0 }, WM_MOUSEWHEEL, noModifierKeys, WHEEL_DELTA));
     }
 };

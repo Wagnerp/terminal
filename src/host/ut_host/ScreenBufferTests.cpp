@@ -69,6 +69,9 @@ class ScreenBufferTests
         // Make sure a test hasn't left us in the alt buffer on accident
         VERIFY_IS_FALSE(currentBuffer._IsAltBuffer());
         VERIFY_SUCCEEDED(currentBuffer.SetViewportOrigin(true, { 0, 0 }, true));
+        // Make sure the viewport always starts off at the default size.
+        auto defaultSize = COORD{ CommonState::s_csWindowWidth, CommonState::s_csWindowHeight };
+        currentBuffer.SetViewport(Viewport::FromDimensions(defaultSize), true);
         VERIFY_ARE_EQUAL(COORD({ 0, 0 }), currentBuffer.GetTextBuffer().GetCursor().GetPosition());
 
         return true;
@@ -89,9 +92,9 @@ class ScreenBufferTests
 
     TEST_METHOD(TestReverseLineFeed);
 
-    TEST_METHOD(TestAddTabStop);
+    TEST_METHOD(TestResetClearTabStops);
 
-    TEST_METHOD(TestClearTabStops);
+    TEST_METHOD(TestAddTabStop);
 
     TEST_METHOD(TestClearTabStop);
 
@@ -99,9 +102,7 @@ class ScreenBufferTests
 
     TEST_METHOD(TestGetReverseTab);
 
-    TEST_METHOD(TestAreTabsSet);
-
-    TEST_METHOD(TestAltBufferDefaultTabStops);
+    TEST_METHOD(TestAltBufferTabStops);
 
     TEST_METHOD(EraseAllTests);
 
@@ -138,8 +139,8 @@ class ScreenBufferTests
     TEST_METHOD(GetWordBoundaryTrimZerosOff);
 
     TEST_METHOD(TestAltBufferCursorState);
-
     TEST_METHOD(TestAltBufferVtDispatching);
+    TEST_METHOD(TestAltBufferRIS);
 
     TEST_METHOD(SetDefaultsIndividuallyBothDefault);
     TEST_METHOD(SetDefaultsTogether);
@@ -194,8 +195,6 @@ class ScreenBufferTests
 
     TEST_METHOD(ClearAlternateBuffer);
 
-    TEST_METHOD(InitializeTabStopsInVTMode);
-
     TEST_METHOD(TestExtendedTextAttributes);
     TEST_METHOD(TestExtendedTextAttributesWithColors);
 
@@ -211,6 +210,10 @@ class ScreenBufferTests
     TEST_METHOD(ScreenAlignmentPattern);
 
     TEST_METHOD(TestCursorIsOn);
+
+    TEST_METHOD(UpdateVirtualBottomWhenCursorMovesBelowIt);
+
+    TEST_METHOD(TestWriteConsoleVTQuirkMode);
 };
 
 void ScreenBufferTests::SingleAlternateBufferCreationTest()
@@ -417,147 +420,229 @@ void ScreenBufferTests::TestReverseLineFeed()
     VERIFY_ARE_EQUAL(c.Y, 6);
 }
 
+void _SetTabStops(SCREEN_INFORMATION& screenInfo, std::list<short> columns, bool replace)
+{
+    auto& stateMachine = screenInfo.GetStateMachine();
+    auto& cursor = screenInfo.GetTextBuffer().GetCursor();
+    const auto clearTabStops = L"\033[3g";
+    const auto addTabStop = L"\033H";
+
+    if (replace)
+    {
+        stateMachine.ProcessString(clearTabStops);
+    }
+
+    for (auto column : columns)
+    {
+        cursor.SetXPosition(column);
+        stateMachine.ProcessString(addTabStop);
+    }
+}
+
+std::list<short> _GetTabStops(SCREEN_INFORMATION& screenInfo)
+{
+    std::list<short> columns;
+
+    const auto lastColumn = screenInfo.GetBufferSize().RightInclusive();
+    auto& stateMachine = screenInfo.GetStateMachine();
+    auto& cursor = screenInfo.GetTextBuffer().GetCursor();
+
+    cursor.SetPosition({ 0, 0 });
+    for (;;)
+    {
+        stateMachine.ProcessCharacter(L'\t');
+        auto column = cursor.GetPosition().X;
+        if (column >= lastColumn)
+        {
+            break;
+        }
+        columns.push_back(column);
+    }
+
+    return columns;
+}
+
+void ScreenBufferTests::TestResetClearTabStops()
+{
+    // Reset the screen buffer to test the defaults.
+    m_state->CleanupGlobalScreenBuffer();
+    m_state->PrepareGlobalScreenBuffer();
+
+    CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
+    SCREEN_INFORMATION& screenInfo = gci.GetActiveOutputBuffer();
+    auto& stateMachine = screenInfo.GetStateMachine();
+
+    const auto clearTabStops = L"\033[3g";
+    const auto resetToInitialState = L"\033c";
+
+    Log::Comment(L"Default tabs every 8 columns.");
+    std::list<short> expectedStops{ 8, 16, 24, 32, 40, 48, 56, 64, 72 };
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(screenInfo));
+
+    Log::Comment(L"Clear all tabs.");
+    stateMachine.ProcessString(clearTabStops);
+    expectedStops = {};
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(screenInfo));
+
+    Log::Comment(L"RIS resets tabs to defaults.");
+    stateMachine.ProcessString(resetToInitialState);
+    expectedStops = { 8, 16, 24, 32, 40, 48, 56, 64, 72 };
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(screenInfo));
+}
+
 void ScreenBufferTests::TestAddTabStop()
 {
     CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
     SCREEN_INFORMATION& screenInfo = gci.GetActiveOutputBuffer();
-    screenInfo.ClearTabStops();
-    auto scopeExit = wil::scope_exit([&]() { screenInfo.ClearTabStops(); });
+    auto& stateMachine = screenInfo.GetStateMachine();
+    auto& cursor = screenInfo.GetTextBuffer().GetCursor();
 
-    std::list<short> expectedStops{ 12 };
+    const auto clearTabStops = L"\033[3g";
+    const auto addTabStop = L"\033H";
+
+    Log::Comment(L"Clear all tabs.");
+    stateMachine.ProcessString(clearTabStops);
+    std::list<short> expectedStops{};
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(screenInfo));
+
     Log::Comment(L"Add tab to empty list.");
-    screenInfo.AddTabStop(12);
-    VERIFY_ARE_EQUAL(expectedStops, screenInfo._tabStops);
+    cursor.SetXPosition(12);
+    stateMachine.ProcessString(addTabStop);
+    expectedStops.push_back(12);
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(screenInfo));
 
     Log::Comment(L"Add tab to head of existing list.");
-    screenInfo.AddTabStop(4);
+    cursor.SetXPosition(4);
+    stateMachine.ProcessString(addTabStop);
     expectedStops.push_front(4);
-    VERIFY_ARE_EQUAL(expectedStops, screenInfo._tabStops);
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(screenInfo));
 
     Log::Comment(L"Add tab to tail of existing list.");
-    screenInfo.AddTabStop(30);
+    cursor.SetXPosition(30);
+    stateMachine.ProcessString(addTabStop);
     expectedStops.push_back(30);
-    VERIFY_ARE_EQUAL(expectedStops, screenInfo._tabStops);
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(screenInfo));
 
     Log::Comment(L"Add tab to middle of existing list.");
-    screenInfo.AddTabStop(24);
+    cursor.SetXPosition(24);
+    stateMachine.ProcessString(addTabStop);
     expectedStops.push_back(24);
     expectedStops.sort();
-    VERIFY_ARE_EQUAL(expectedStops, screenInfo._tabStops);
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(screenInfo));
 
     Log::Comment(L"Add tab that duplicates an item in the existing list.");
-    screenInfo.AddTabStop(24);
-    VERIFY_ARE_EQUAL(expectedStops, screenInfo._tabStops);
-}
-
-void ScreenBufferTests::TestClearTabStops()
-{
-    CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
-    SCREEN_INFORMATION& screenInfo = gci.GetActiveOutputBuffer();
-
-    Log::Comment(L"Clear nonexistent tab stops.");
-    {
-        screenInfo.ClearTabStops();
-        VERIFY_IS_TRUE(screenInfo._tabStops.empty());
-    }
-
-    Log::Comment(L"Clear handful of tab stops.");
-    {
-        for (auto x : { 3, 6, 13, 2, 25 })
-        {
-            screenInfo.AddTabStop(gsl::narrow<short>(x));
-        }
-        VERIFY_IS_FALSE(screenInfo._tabStops.empty());
-        screenInfo.ClearTabStops();
-        VERIFY_IS_TRUE(screenInfo._tabStops.empty());
-    }
+    cursor.SetXPosition(24);
+    stateMachine.ProcessString(addTabStop);
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(screenInfo));
 }
 
 void ScreenBufferTests::TestClearTabStop()
 {
     CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
     SCREEN_INFORMATION& screenInfo = gci.GetActiveOutputBuffer();
+    auto& stateMachine = screenInfo.GetStateMachine();
+    auto& cursor = screenInfo.GetTextBuffer().GetCursor();
+
+    const auto clearTabStops = L"\033[3g";
+    const auto clearTabStop = L"\033[0g";
+    const auto addTabStop = L"\033H";
+
+    Log::Comment(L"Start with all tabs cleared.");
+    {
+        stateMachine.ProcessString(clearTabStops);
+
+        VERIFY_IS_TRUE(_GetTabStops(screenInfo).empty());
+    }
 
     Log::Comment(L"Try to clear nonexistent list.");
     {
-        screenInfo.ClearTabStop(0);
+        cursor.SetXPosition(0);
+        stateMachine.ProcessString(clearTabStop);
 
-        VERIFY_IS_TRUE(screenInfo._tabStops.empty(), L"List should remain empty");
+        VERIFY_IS_TRUE(_GetTabStops(screenInfo).empty(), L"List should remain empty");
     }
 
     Log::Comment(L"Allocate 1 list item and clear it.");
     {
-        screenInfo._tabStops.push_back(0);
-        screenInfo.ClearTabStop(0);
+        cursor.SetXPosition(0);
+        stateMachine.ProcessString(addTabStop);
+        stateMachine.ProcessString(clearTabStop);
 
-        VERIFY_IS_TRUE(screenInfo._tabStops.empty());
+        VERIFY_IS_TRUE(_GetTabStops(screenInfo).empty());
     }
 
     Log::Comment(L"Allocate 1 list item and clear nonexistent.");
     {
-        screenInfo._tabStops.push_back(0);
+        cursor.SetXPosition(1);
+        stateMachine.ProcessString(addTabStop);
 
         Log::Comment(L"Free greater");
-        screenInfo.ClearTabStop(1);
-        VERIFY_IS_FALSE(screenInfo._tabStops.empty());
+        cursor.SetXPosition(2);
+        stateMachine.ProcessString(clearTabStop);
+        VERIFY_IS_FALSE(_GetTabStops(screenInfo).empty());
 
         Log::Comment(L"Free less than");
-        screenInfo.ClearTabStop(-1);
-        VERIFY_IS_FALSE(screenInfo._tabStops.empty());
+        cursor.SetXPosition(0);
+        stateMachine.ProcessString(clearTabStop);
+        VERIFY_IS_FALSE(_GetTabStops(screenInfo).empty());
 
         // clear all tab stops
-        screenInfo._tabStops.clear();
+        stateMachine.ProcessString(clearTabStops);
     }
 
     Log::Comment(L"Allocate many (5) list items and clear head.");
     {
         std::list<short> inputData = { 3, 5, 6, 10, 15, 17 };
-        screenInfo._tabStops = inputData;
-        screenInfo.ClearTabStop(inputData.front());
+        _SetTabStops(screenInfo, inputData, false);
+        cursor.SetXPosition(inputData.front());
+        stateMachine.ProcessString(clearTabStop);
 
         inputData.pop_front();
-        VERIFY_ARE_EQUAL(inputData, screenInfo._tabStops);
+        VERIFY_ARE_EQUAL(inputData, _GetTabStops(screenInfo));
 
         // clear all tab stops
-        screenInfo._tabStops.clear();
+        stateMachine.ProcessString(clearTabStops);
     }
 
     Log::Comment(L"Allocate many (5) list items and clear middle.");
     {
         std::list<short> inputData = { 3, 5, 6, 10, 15, 17 };
-        screenInfo._tabStops = inputData;
-        screenInfo.ClearTabStop(*std::next(inputData.begin()));
+        _SetTabStops(screenInfo, inputData, false);
+        cursor.SetXPosition(*std::next(inputData.begin()));
+        stateMachine.ProcessString(clearTabStop);
 
         inputData.erase(std::next(inputData.begin()));
-        VERIFY_ARE_EQUAL(inputData, screenInfo._tabStops);
+        VERIFY_ARE_EQUAL(inputData, _GetTabStops(screenInfo));
 
         // clear all tab stops
-        screenInfo._tabStops.clear();
+        stateMachine.ProcessString(clearTabStops);
     }
 
     Log::Comment(L"Allocate many (5) list items and clear tail.");
     {
         std::list<short> inputData = { 3, 5, 6, 10, 15, 17 };
-        screenInfo._tabStops = inputData;
-        screenInfo.ClearTabStop(inputData.back());
+        _SetTabStops(screenInfo, inputData, false);
+        cursor.SetXPosition(inputData.back());
+        stateMachine.ProcessString(clearTabStop);
 
         inputData.pop_back();
-        VERIFY_ARE_EQUAL(inputData, screenInfo._tabStops);
+        VERIFY_ARE_EQUAL(inputData, _GetTabStops(screenInfo));
 
         // clear all tab stops
-        screenInfo._tabStops.clear();
+        stateMachine.ProcessString(clearTabStops);
     }
 
     Log::Comment(L"Allocate many (5) list items and clear nonexistent item.");
     {
         std::list<short> inputData = { 3, 5, 6, 10, 15, 17 };
-        screenInfo._tabStops = inputData;
-        screenInfo.ClearTabStop(9000);
+        _SetTabStops(screenInfo, inputData, false);
+        cursor.SetXPosition(0);
+        stateMachine.ProcessString(clearTabStop);
 
-        VERIFY_ARE_EQUAL(inputData, screenInfo._tabStops);
+        VERIFY_ARE_EQUAL(inputData, _GetTabStops(screenInfo));
 
         // clear all tab stops
-        screenInfo._tabStops.clear();
+        stateMachine.ProcessString(clearTabStops);
     }
 }
 
@@ -565,23 +650,25 @@ void ScreenBufferTests::TestGetForwardTab()
 {
     CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
     SCREEN_INFORMATION& si = gci.GetActiveOutputBuffer();
+    auto& stateMachine = si.GetStateMachine();
+    auto& cursor = si.GetTextBuffer().GetCursor();
+
+    const auto nextForwardTab = L"\033[I";
 
     std::list<short> inputData = { 3, 5, 6, 10, 15, 17 };
-    si._tabStops = inputData;
+    _SetTabStops(si, inputData, true);
 
     const COORD coordScreenBufferSize = si.GetBufferSize().Dimensions();
-    COORD coordCursor;
-    coordCursor.Y = coordScreenBufferSize.Y / 2; // in the middle of the buffer, it doesn't make a difference.
 
     Log::Comment(L"Find next tab from before front.");
     {
-        coordCursor.X = 0;
+        cursor.SetXPosition(0);
 
-        COORD coordCursorExpected;
-        coordCursorExpected = coordCursor;
+        COORD coordCursorExpected = cursor.GetPosition();
         coordCursorExpected.X = inputData.front();
 
-        COORD const coordCursorResult = si.GetForwardTab(coordCursor);
+        stateMachine.ProcessString(nextForwardTab);
+        COORD const coordCursorResult = cursor.GetPosition();
         VERIFY_ARE_EQUAL(coordCursorExpected,
                          coordCursorResult,
                          L"Cursor advanced to first tab stop from sample list.");
@@ -589,13 +676,13 @@ void ScreenBufferTests::TestGetForwardTab()
 
     Log::Comment(L"Find next tab from in the middle.");
     {
-        coordCursor.X = 6;
+        cursor.SetXPosition(6);
 
-        COORD coordCursorExpected;
-        coordCursorExpected = coordCursor;
+        COORD coordCursorExpected = cursor.GetPosition();
         coordCursorExpected.X = *std::next(inputData.begin(), 3);
 
-        COORD const coordCursorResult = si.GetForwardTab(coordCursor);
+        stateMachine.ProcessString(nextForwardTab);
+        COORD const coordCursorResult = cursor.GetPosition();
         VERIFY_ARE_EQUAL(coordCursorExpected,
                          coordCursorResult,
                          L"Cursor advanced to middle tab stop from sample list.");
@@ -603,13 +690,13 @@ void ScreenBufferTests::TestGetForwardTab()
 
     Log::Comment(L"Find next tab from end.");
     {
-        coordCursor.X = 30;
+        cursor.SetXPosition(30);
 
-        COORD coordCursorExpected;
-        coordCursorExpected = coordCursor;
+        COORD coordCursorExpected = cursor.GetPosition();
         coordCursorExpected.X = coordScreenBufferSize.X - 1;
 
-        COORD const coordCursorResult = si.GetForwardTab(coordCursor);
+        stateMachine.ProcessString(nextForwardTab);
+        COORD const coordCursorResult = cursor.GetPosition();
         VERIFY_ARE_EQUAL(coordCursorExpected,
                          coordCursorResult,
                          L"Cursor advanced to end of screen buffer.");
@@ -617,41 +704,39 @@ void ScreenBufferTests::TestGetForwardTab()
 
     Log::Comment(L"Find next tab from rightmost column.");
     {
-        coordCursor.X = coordScreenBufferSize.X - 1;
+        cursor.SetXPosition(coordScreenBufferSize.X - 1);
 
-        COORD coordCursorExpected;
-        coordCursorExpected = coordCursor;
+        COORD coordCursorExpected = cursor.GetPosition();
 
-        COORD const coordCursorResult = si.GetForwardTab(coordCursor);
+        stateMachine.ProcessString(nextForwardTab);
+        COORD const coordCursorResult = cursor.GetPosition();
         VERIFY_ARE_EQUAL(coordCursorExpected,
                          coordCursorResult,
                          L"Cursor remains in rightmost column.");
     }
-
-    si._tabStops.clear();
 }
 
 void ScreenBufferTests::TestGetReverseTab()
 {
     CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
     SCREEN_INFORMATION& si = gci.GetActiveOutputBuffer();
+    auto& stateMachine = si.GetStateMachine();
+    auto& cursor = si.GetTextBuffer().GetCursor();
+
+    const auto nextReverseTab = L"\033[Z";
 
     std::list<short> inputData = { 3, 5, 6, 10, 15, 17 };
-    si._tabStops = inputData;
-
-    COORD coordCursor;
-    // in the middle of the buffer, it doesn't make a difference.
-    coordCursor.Y = si.GetBufferSize().Height() / 2;
+    _SetTabStops(si, inputData, true);
 
     Log::Comment(L"Find previous tab from before front.");
     {
-        coordCursor.X = 1;
+        cursor.SetXPosition(1);
 
-        COORD coordCursorExpected;
-        coordCursorExpected = coordCursor;
+        COORD coordCursorExpected = cursor.GetPosition();
         coordCursorExpected.X = 0;
 
-        COORD const coordCursorResult = si.GetReverseTab(coordCursor);
+        stateMachine.ProcessString(nextReverseTab);
+        COORD const coordCursorResult = cursor.GetPosition();
         VERIFY_ARE_EQUAL(coordCursorExpected,
                          coordCursorResult,
                          L"Cursor adjusted to beginning of the buffer when it started before sample list.");
@@ -659,13 +744,13 @@ void ScreenBufferTests::TestGetReverseTab()
 
     Log::Comment(L"Find previous tab from in the middle.");
     {
-        coordCursor.X = 6;
+        cursor.SetXPosition(6);
 
-        COORD coordCursorExpected;
-        coordCursorExpected = coordCursor;
+        COORD coordCursorExpected = cursor.GetPosition();
         coordCursorExpected.X = *std::next(inputData.begin());
 
-        COORD const coordCursorResult = si.GetReverseTab(coordCursor);
+        stateMachine.ProcessString(nextReverseTab);
+        COORD const coordCursorResult = cursor.GetPosition();
         VERIFY_ARE_EQUAL(coordCursorExpected,
                          coordCursorResult,
                          L"Cursor adjusted back one tab spot from middle of sample list.");
@@ -673,34 +758,20 @@ void ScreenBufferTests::TestGetReverseTab()
 
     Log::Comment(L"Find next tab from end.");
     {
-        coordCursor.X = 30;
+        cursor.SetXPosition(30);
 
-        COORD coordCursorExpected;
-        coordCursorExpected = coordCursor;
+        COORD coordCursorExpected = cursor.GetPosition();
         coordCursorExpected.X = inputData.back();
 
-        COORD const coordCursorResult = si.GetReverseTab(coordCursor);
+        stateMachine.ProcessString(nextReverseTab);
+        COORD const coordCursorResult = cursor.GetPosition();
         VERIFY_ARE_EQUAL(coordCursorExpected,
                          coordCursorResult,
                          L"Cursor adjusted to last item in the sample list from position beyond end.");
     }
-
-    si._tabStops.clear();
 }
 
-void ScreenBufferTests::TestAreTabsSet()
-{
-    CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
-    SCREEN_INFORMATION& si = gci.GetActiveOutputBuffer();
-
-    si._tabStops.clear();
-    VERIFY_IS_FALSE(si.AreTabsSet());
-
-    si.AddTabStop(1);
-    VERIFY_IS_TRUE(si.AreTabsSet());
-}
-
-void ScreenBufferTests::TestAltBufferDefaultTabStops()
+void ScreenBufferTests::TestAltBufferTabStops()
 {
     CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
     gci.LockConsole(); // Lock must be taken to swap buffers.
@@ -711,8 +782,10 @@ void ScreenBufferTests::TestAltBufferDefaultTabStops()
     WI_SetFlag(mainBuffer.OutputMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     VERIFY_IS_TRUE(WI_IsFlagSet(mainBuffer.OutputMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING));
 
-    mainBuffer.SetDefaultVtTabStops();
-    VERIFY_IS_TRUE(mainBuffer.AreTabsSet());
+    Log::Comment(L"Add an initial set of tab in the main buffer.");
+    std::list<short> expectedStops = { 3, 5, 6, 10, 15, 17 };
+    _SetTabStops(mainBuffer, expectedStops, true);
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(mainBuffer));
 
     VERIFY_SUCCEEDED(mainBuffer.UseAlternateScreenBuffer());
     SCREEN_INFORMATION& altBuffer = gci.GetActiveOutputBuffer();
@@ -724,39 +797,19 @@ void ScreenBufferTests::TestAltBufferDefaultTabStops()
     WI_SetFlag(altBuffer.OutputMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 
     VERIFY_IS_TRUE(WI_IsFlagSet(altBuffer.OutputMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING));
-    VERIFY_IS_TRUE(altBuffer.AreTabsSet());
-    VERIFY_IS_TRUE(altBuffer._tabStops.size() > 3);
 
-    const COORD origin{ 0, 0 };
-    auto& cursor = altBuffer.GetTextBuffer().GetCursor();
-    cursor.SetPosition(origin);
-    auto& stateMachine = altBuffer.GetStateMachine();
+    Log::Comment(L"Make sure the tabs are still set in the alt buffer.");
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(altBuffer));
 
-    Log::Comment(NoThrowString().Format(
-        L"Tab a few times - make sure the cursor is where we expect."));
+    Log::Comment(L"Add a new set of tabs in the alt buffer.");
+    expectedStops = { 4, 8, 12, 16 };
+    _SetTabStops(altBuffer, expectedStops, true);
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(altBuffer));
 
-    stateMachine.ProcessString(L"\t");
-    COORD expected{ 8, 0 };
-    VERIFY_ARE_EQUAL(expected, cursor.GetPosition());
-
-    stateMachine.ProcessString(L"\t");
-    expected = { 16, 0 };
-    VERIFY_ARE_EQUAL(expected, cursor.GetPosition());
-
-    stateMachine.ProcessString(L"\n");
-    expected = { 0, 1 };
-    VERIFY_ARE_EQUAL(expected, cursor.GetPosition());
-
-    altBuffer.ClearTabStops();
-    VERIFY_IS_FALSE(altBuffer.AreTabsSet());
-    stateMachine.ProcessString(L"\t");
-    expected = { altBuffer.GetBufferSize().Width() - 1, 1 };
-
-    VERIFY_ARE_EQUAL(expected, cursor.GetPosition());
-
+    Log::Comment(L"Make sure the tabs are still set in the main buffer.");
     useMain.release();
     altBuffer.UseMainScreenBuffer();
-    VERIFY_IS_TRUE(mainBuffer.AreTabsSet());
+    VERIFY_ARE_EQUAL(expectedStops, _GetTabStops(mainBuffer));
 }
 
 void ScreenBufferTests::EraseAllTests()
@@ -1266,7 +1319,7 @@ void ScreenBufferTests::VtScrollMarginsNewlineColor()
     const COLORREF magenta = RGB(255, 0, 255);
     gci.SetDefaultForegroundColor(yellow);
     gci.SetDefaultBackgroundColor(magenta);
-    const TextAttribute defaultAttrs = gci.GetDefaultAttributes();
+    const TextAttribute defaultAttrs = {};
     si.SetAttributes(defaultAttrs);
 
     Log::Comment(NoThrowString().Format(L"Begin by clearing the screen."));
@@ -1309,8 +1362,7 @@ void ScreenBufferTests::VtScrollMarginsNewlineColor()
                 const auto& attr = attrs[x];
                 VERIFY_ARE_EQUAL(false, attr.IsLegacy());
                 VERIFY_ARE_EQUAL(defaultAttrs, attr);
-                VERIFY_ARE_EQUAL(yellow, gci.LookupForegroundColor(attr));
-                VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attr));
+                VERIFY_ARE_EQUAL(std::make_pair(yellow, magenta), gci.LookupAttributeColors(attr));
             }
         }
     }
@@ -1349,8 +1401,9 @@ void ScreenBufferTests::VtNewlinePastViewport()
 
     // Set the attributes that will be used to initialize new rows.
     auto fillAttr = TextAttribute{ RGB(12, 34, 56), RGB(78, 90, 12) };
-    fillAttr.SetExtendedAttributes(ExtendedAttributes::CrossedOut);
-    fillAttr.SetMetaAttributes(COMMON_LVB_REVERSE_VIDEO | COMMON_LVB_UNDERSCORE);
+    fillAttr.SetCrossedOut(true);
+    fillAttr.SetReverseVideo(true);
+    fillAttr.SetUnderlined(true);
     si.SetAttributes(fillAttr);
     // But note that the meta attributes are expected to be cleared.
     auto expectedFillAttr = fillAttr;
@@ -1425,8 +1478,9 @@ void ScreenBufferTests::VtNewlinePastEndOfBuffer()
 
     // Set the attributes that will be used to initialize new rows.
     auto fillAttr = TextAttribute{ RGB(12, 34, 56), RGB(78, 90, 12) };
-    fillAttr.SetExtendedAttributes(ExtendedAttributes::CrossedOut);
-    fillAttr.SetMetaAttributes(COMMON_LVB_REVERSE_VIDEO | COMMON_LVB_UNDERSCORE);
+    fillAttr.SetCrossedOut(true);
+    fillAttr.SetReverseVideo(true);
+    fillAttr.SetUnderlined(true);
     si.SetAttributes(fillAttr);
     // But note that the meta attributes are expected to be cleared.
     auto expectedFillAttr = fillAttr;
@@ -1791,7 +1845,9 @@ void ScreenBufferTests::VtEraseAllPersistCursorFillColor()
         L"Change the colors to dark_red on bright_blue, then execute a Erase All.\n"
         L"The viewport should be full of dark_red on bright_blue"));
 
-    auto expectedAttr = TextAttribute(XtermToLegacy(1, 12));
+    auto expectedAttr = TextAttribute{};
+    expectedAttr.SetIndexedForeground((BYTE)XtermToWindowsIndex(1));
+    expectedAttr.SetIndexedBackground((BYTE)XtermToWindowsIndex(12));
     stateMachine.ProcessString(L"\x1b[31;104m");
 
     VERIFY_ARE_EQUAL(expectedAttr, si.GetAttributes());
@@ -2016,7 +2072,7 @@ void ScreenBufferTests::TestAltBufferVtDispatching()
     WI_SetFlag(mainBuffer.OutputMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING);
     // Make sure we're suing the default attributes at the start of the test,
     // Otherwise they could be polluted from a previous test.
-    mainBuffer.SetAttributes(gci.GetDefaultAttributes());
+    mainBuffer.SetAttributes({});
 
     VERIFY_IS_NULL(mainBuffer._psiAlternateBuffer);
     VERIFY_IS_NULL(mainBuffer._psiMainBuffer);
@@ -2060,13 +2116,13 @@ void ScreenBufferTests::TestAltBufferVtDispatching()
         std::unique_ptr<WriteData> waiter;
         std::wstring seq = L"\x1b[5;6H";
         size_t seqCb = 2 * seq.size();
-        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, waiter));
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, false, waiter));
 
         VERIFY_ARE_EQUAL(COORD({ 0, 0 }), mainCursor.GetPosition());
         // recall: vt coordinates are (row, column), 1-indexed
         VERIFY_ARE_EQUAL(COORD({ 5, 4 }), altCursor.GetPosition());
 
-        const TextAttribute expectedDefaults = gci.GetDefaultAttributes();
+        const TextAttribute expectedDefaults = {};
         TextAttribute expectedRgb = expectedDefaults;
         expectedRgb.SetBackground(RGB(255, 0, 255));
 
@@ -2075,14 +2131,14 @@ void ScreenBufferTests::TestAltBufferVtDispatching()
 
         seq = L"\x1b[48;2;255;0;255m";
         seqCb = 2 * seq.size();
-        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, waiter));
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, false, waiter));
 
         VERIFY_ARE_EQUAL(expectedDefaults, mainBuffer.GetAttributes());
         VERIFY_ARE_EQUAL(expectedRgb, alternate.GetAttributes());
 
         seq = L"X";
         seqCb = 2 * seq.size();
-        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, waiter));
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, false, waiter));
 
         VERIFY_ARE_EQUAL(COORD({ 0, 0 }), mainCursor.GetPosition());
         VERIFY_ARE_EQUAL(COORD({ 6, 4 }), altCursor.GetPosition());
@@ -2095,6 +2151,27 @@ void ScreenBufferTests::TestAltBufferVtDispatching()
         const auto altAttrA = altAttrs[altCursor.GetPosition().X - 1];
         VERIFY_ARE_EQUAL(expectedRgb, altAttrA);
     }
+}
+
+void ScreenBufferTests::TestAltBufferRIS()
+{
+    CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
+    gci.LockConsole(); // Lock must be taken to manipulate buffer.
+    auto unlock = wil::scope_exit([&] { gci.UnlockConsole(); });
+
+    SCREEN_INFORMATION& si = gci.GetActiveOutputBuffer();
+    StateMachine& stateMachine = si.GetStateMachine();
+
+    Log::Comment(L"Initially in main buffer");
+    VERIFY_IS_FALSE(gci.GetActiveOutputBuffer()._IsAltBuffer());
+
+    Log::Comment(L"Switch to alt buffer");
+    stateMachine.ProcessString(L"\x1b[?1049h");
+    VERIFY_IS_TRUE(gci.GetActiveOutputBuffer()._IsAltBuffer());
+
+    Log::Comment(L"RIS returns to main buffer");
+    stateMachine.ProcessString(L"\033c");
+    VERIFY_IS_FALSE(gci.GetActiveOutputBuffer()._IsAltBuffer());
 }
 
 void ScreenBufferTests::SetDefaultsIndividuallyBothDefault()
@@ -2118,7 +2195,7 @@ void ScreenBufferTests::SetDefaultsIndividuallyBothDefault()
 
     gci.SetDefaultForegroundColor(yellow);
     gci.SetDefaultBackgroundColor(magenta);
-    si.SetDefaultAttributes(gci.GetDefaultAttributes(), { gci.GetPopupFillAttribute() });
+    si.SetDefaultAttributes({}, TextAttribute{ gci.GetPopupFillAttribute() });
 
     Log::Comment(NoThrowString().Format(L"Write 6 X's:"));
     Log::Comment(NoThrowString().Format(L"  The first in default-fg on default-bg (yellow on magenta)"));
@@ -2148,12 +2225,14 @@ void ScreenBufferTests::SetDefaultsIndividuallyBothDefault()
 
     // See the log comment above for description of these values.
     TextAttribute expectedDefaults{};
-    TextAttribute expectedTwo{ FOREGROUND_GREEN | FOREGROUND_INTENSITY | BACKGROUND_BLUE };
-    TextAttribute expectedThree{ FOREGROUND_GREEN | FOREGROUND_INTENSITY | BACKGROUND_BLUE };
+    TextAttribute expectedTwo;
+    expectedTwo.SetIndexedForeground((BYTE)XtermToWindowsIndex(10));
+    expectedTwo.SetIndexedBackground((BYTE)XtermToWindowsIndex(4));
+    TextAttribute expectedThree = expectedTwo;
     expectedThree.SetDefaultForeground();
     // Four is the same as Defaults
     // Five is the same as two
-    TextAttribute expectedSix{ FOREGROUND_GREEN | FOREGROUND_INTENSITY | BACKGROUND_BLUE };
+    TextAttribute expectedSix = expectedTwo;
     expectedSix.SetDefaultBackground();
 
     COORD expectedCursor{ 6, 0 };
@@ -2190,19 +2269,12 @@ void ScreenBufferTests::SetDefaultsIndividuallyBothDefault()
     VERIFY_ARE_EQUAL(expectedTwo, attrE);
     VERIFY_ARE_EQUAL(expectedSix, attrF);
 
-    VERIFY_ARE_EQUAL(yellow, gci.LookupForegroundColor(attrA));
-    VERIFY_ARE_EQUAL(brightGreen, gci.LookupForegroundColor(attrB));
-    VERIFY_ARE_EQUAL(yellow, gci.LookupForegroundColor(attrC));
-    VERIFY_ARE_EQUAL(yellow, gci.LookupForegroundColor(attrD));
-    VERIFY_ARE_EQUAL(brightGreen, gci.LookupForegroundColor(attrE));
-    VERIFY_ARE_EQUAL(brightGreen, gci.LookupForegroundColor(attrF));
-
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrA));
-    VERIFY_ARE_EQUAL(darkBlue, gci.LookupBackgroundColor(attrB));
-    VERIFY_ARE_EQUAL(darkBlue, gci.LookupBackgroundColor(attrC));
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrD));
-    VERIFY_ARE_EQUAL(darkBlue, gci.LookupBackgroundColor(attrE));
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrF));
+    VERIFY_ARE_EQUAL(std::make_pair(yellow, magenta), gci.LookupAttributeColors(attrA));
+    VERIFY_ARE_EQUAL(std::make_pair(brightGreen, darkBlue), gci.LookupAttributeColors(attrB));
+    VERIFY_ARE_EQUAL(std::make_pair(yellow, darkBlue), gci.LookupAttributeColors(attrC));
+    VERIFY_ARE_EQUAL(std::make_pair(yellow, magenta), gci.LookupAttributeColors(attrD));
+    VERIFY_ARE_EQUAL(std::make_pair(brightGreen, darkBlue), gci.LookupAttributeColors(attrE));
+    VERIFY_ARE_EQUAL(std::make_pair(brightGreen, magenta), gci.LookupAttributeColors(attrF));
 }
 
 void ScreenBufferTests::SetDefaultsTogether()
@@ -2225,7 +2297,7 @@ void ScreenBufferTests::SetDefaultsTogether()
 
     gci.SetDefaultForegroundColor(yellow);
     gci.SetDefaultBackgroundColor(magenta);
-    si.SetDefaultAttributes(gci.GetDefaultAttributes(), { gci.GetPopupFillAttribute() });
+    si.SetDefaultAttributes({}, TextAttribute{ gci.GetPopupFillAttribute() });
 
     Log::Comment(NoThrowString().Format(L"Write 6 X's:"));
     Log::Comment(NoThrowString().Format(L"  The first in default-fg on default-bg (yellow on magenta)"));
@@ -2250,7 +2322,7 @@ void ScreenBufferTests::SetDefaultsTogether()
     // See the log comment above for description of these values.
     TextAttribute expectedDefaults{};
     TextAttribute expectedTwo{};
-    expectedTwo.SetBackground(color250);
+    expectedTwo.SetIndexedBackground256(250);
 
     COORD expectedCursor{ 3, 0 };
     VERIFY_ARE_EQUAL(expectedCursor, cursor.GetPosition());
@@ -2274,13 +2346,9 @@ void ScreenBufferTests::SetDefaultsTogether()
     VERIFY_ARE_EQUAL(expectedTwo, attrB);
     VERIFY_ARE_EQUAL(expectedDefaults, attrC);
 
-    VERIFY_ARE_EQUAL(yellow, gci.LookupForegroundColor(attrA));
-    VERIFY_ARE_EQUAL(yellow, gci.LookupForegroundColor(attrB));
-    VERIFY_ARE_EQUAL(yellow, gci.LookupForegroundColor(attrC));
-
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrA));
-    VERIFY_ARE_EQUAL(color250, gci.LookupBackgroundColor(attrB));
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrC));
+    VERIFY_ARE_EQUAL(std::make_pair(yellow, magenta), gci.LookupAttributeColors(attrA));
+    VERIFY_ARE_EQUAL(std::make_pair(yellow, color250), gci.LookupAttributeColors(attrB));
+    VERIFY_ARE_EQUAL(std::make_pair(yellow, magenta), gci.LookupAttributeColors(attrC));
 }
 
 void ScreenBufferTests::ReverseResetWithDefaultBackground()
@@ -2300,7 +2368,7 @@ void ScreenBufferTests::ReverseResetWithDefaultBackground()
 
     gci.SetDefaultForegroundColor(INVALID_COLOR);
     gci.SetDefaultBackgroundColor(magenta);
-    si.SetDefaultAttributes(gci.GetDefaultAttributes(), { gci.GetPopupFillAttribute() });
+    si.SetDefaultAttributes({}, TextAttribute{ gci.GetPopupFillAttribute() });
 
     Log::Comment(NoThrowString().Format(L"Write 3 X's:"));
     Log::Comment(NoThrowString().Format(L"  The first in default-attr on default color (magenta)"));
@@ -2336,17 +2404,17 @@ void ScreenBufferTests::ReverseResetWithDefaultBackground()
     VERIFY_ARE_EQUAL(false, attrB.IsLegacy());
     VERIFY_ARE_EQUAL(false, attrC.IsLegacy());
 
-    VERIFY_ARE_EQUAL(false, WI_IsFlagSet(attrA.GetMetaAttributes(), COMMON_LVB_REVERSE_VIDEO));
-    VERIFY_ARE_EQUAL(true, WI_IsFlagSet(attrB.GetMetaAttributes(), COMMON_LVB_REVERSE_VIDEO));
-    VERIFY_ARE_EQUAL(false, WI_IsFlagSet(attrC.GetMetaAttributes(), COMMON_LVB_REVERSE_VIDEO));
+    VERIFY_ARE_EQUAL(false, attrA.IsReverseVideo());
+    VERIFY_ARE_EQUAL(true, attrB.IsReverseVideo());
+    VERIFY_ARE_EQUAL(false, attrC.IsReverseVideo());
 
     VERIFY_ARE_EQUAL(expectedDefaults, attrA);
     VERIFY_ARE_EQUAL(expectedReversed, attrB);
     VERIFY_ARE_EQUAL(expectedDefaults, attrC);
 
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrA));
-    VERIFY_ARE_EQUAL(magenta, gci.LookupForegroundColor(attrB));
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrC));
+    VERIFY_ARE_EQUAL(magenta, gci.LookupAttributeColors(attrA).second);
+    VERIFY_ARE_EQUAL(magenta, gci.LookupAttributeColors(attrB).first);
+    VERIFY_ARE_EQUAL(magenta, gci.LookupAttributeColors(attrC).second);
 }
 
 void ScreenBufferTests::BackspaceDefaultAttrs()
@@ -2368,7 +2436,7 @@ void ScreenBufferTests::BackspaceDefaultAttrs()
     COLORREF magenta = RGB(255, 0, 255);
 
     gci.SetDefaultBackgroundColor(magenta);
-    si.SetDefaultAttributes(gci.GetDefaultAttributes(), { gci.GetPopupFillAttribute() });
+    si.SetDefaultAttributes({}, TextAttribute{ gci.GetPopupFillAttribute() });
 
     Log::Comment(NoThrowString().Format(L"Write 2 X's, then backspace one."));
 
@@ -2397,8 +2465,8 @@ void ScreenBufferTests::BackspaceDefaultAttrs()
     VERIFY_ARE_EQUAL(expectedDefaults, attrA);
     VERIFY_ARE_EQUAL(expectedDefaults, attrB);
 
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrA));
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrB));
+    VERIFY_ARE_EQUAL(magenta, gci.LookupAttributeColors(attrA).second);
+    VERIFY_ARE_EQUAL(magenta, gci.LookupAttributeColors(attrB).second);
 }
 
 void ScreenBufferTests::BackspaceDefaultAttrsWriteCharsLegacy()
@@ -2431,7 +2499,7 @@ void ScreenBufferTests::BackspaceDefaultAttrsWriteCharsLegacy()
     COLORREF magenta = RGB(255, 0, 255);
 
     gci.SetDefaultBackgroundColor(magenta);
-    si.SetDefaultAttributes(gci.GetDefaultAttributes(), { gci.GetPopupFillAttribute() });
+    si.SetDefaultAttributes({}, TextAttribute{ gci.GetPopupFillAttribute() });
 
     Log::Comment(NoThrowString().Format(L"Write 2 X's, then backspace one."));
 
@@ -2474,8 +2542,8 @@ void ScreenBufferTests::BackspaceDefaultAttrsWriteCharsLegacy()
     VERIFY_ARE_EQUAL(expectedDefaults, attrA);
     VERIFY_ARE_EQUAL(expectedDefaults, attrB);
 
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrA));
-    VERIFY_ARE_EQUAL(magenta, gci.LookupBackgroundColor(attrB));
+    VERIFY_ARE_EQUAL(magenta, gci.LookupAttributeColors(attrA).second);
+    VERIFY_ARE_EQUAL(magenta, gci.LookupAttributeColors(attrB).second);
 }
 
 void ScreenBufferTests::BackspaceDefaultAttrsInPrompt()
@@ -2499,7 +2567,7 @@ void ScreenBufferTests::BackspaceDefaultAttrsInPrompt()
     COLORREF magenta = RGB(255, 0, 255);
 
     gci.SetDefaultBackgroundColor(magenta);
-    si.SetDefaultAttributes(gci.GetDefaultAttributes(), { gci.GetPopupFillAttribute() });
+    si.SetDefaultAttributes({}, TextAttribute{ gci.GetPopupFillAttribute() });
     TextAttribute expectedDefaults{};
 
     Log::Comment(NoThrowString().Format(L"Write 3 X's, move to the left, then delete-char the second."));
@@ -2585,7 +2653,7 @@ void ScreenBufferTests::SetGlobalColorTable()
         const std::vector<TextAttribute> attrs{ attrRow->begin(), attrRow->end() };
         const auto attrA = attrs[0];
         LOG_ATTR(attrA);
-        VERIFY_ARE_EQUAL(originalRed, gci.LookupBackgroundColor(attrA));
+        VERIFY_ARE_EQUAL(originalRed, gci.LookupAttributeColors(attrA).second);
     }
 
     Log::Comment(NoThrowString().Format(L"Create an alt buffer"));
@@ -2611,7 +2679,7 @@ void ScreenBufferTests::SetGlobalColorTable()
         const std::vector<TextAttribute> attrs{ attrRow->begin(), attrRow->end() };
         const auto attrA = attrs[0];
         LOG_ATTR(attrA);
-        VERIFY_ARE_EQUAL(originalRed, gci.LookupBackgroundColor(attrA));
+        VERIFY_ARE_EQUAL(originalRed, gci.LookupAttributeColors(attrA).second);
     }
 
     Log::Comment(NoThrowString().Format(L"Change the value of red to RGB(0x11, 0x22, 0x33)"));
@@ -2628,8 +2696,8 @@ void ScreenBufferTests::SetGlobalColorTable()
         const auto attrB = attrs[1];
         LOG_ATTR(attrA);
         LOG_ATTR(attrB);
-        VERIFY_ARE_EQUAL(testColor, gci.LookupBackgroundColor(attrA));
-        VERIFY_ARE_EQUAL(testColor, gci.LookupBackgroundColor(attrB));
+        VERIFY_ARE_EQUAL(testColor, gci.LookupAttributeColors(attrA).second);
+        VERIFY_ARE_EQUAL(testColor, gci.LookupAttributeColors(attrB).second);
     }
 
     Log::Comment(NoThrowString().Format(L"Switch back to the main buffer"));
@@ -2651,8 +2719,8 @@ void ScreenBufferTests::SetGlobalColorTable()
         const auto attrB = attrs[1];
         LOG_ATTR(attrA);
         LOG_ATTR(attrB);
-        VERIFY_ARE_EQUAL(testColor, gci.LookupBackgroundColor(attrA));
-        VERIFY_ARE_EQUAL(testColor, gci.LookupBackgroundColor(attrB));
+        VERIFY_ARE_EQUAL(testColor, gci.LookupAttributeColors(attrA).second);
+        VERIFY_ARE_EQUAL(testColor, gci.LookupAttributeColors(attrB).second);
     }
 }
 
@@ -2691,7 +2759,7 @@ void ScreenBufferTests::SetColorTableThreeDigits()
         const std::vector<TextAttribute> attrs{ attrRow->begin(), attrRow->end() };
         const auto attrA = attrs[0];
         LOG_ATTR(attrA);
-        VERIFY_ARE_EQUAL(originalRed, gci.LookupBackgroundColor(attrA));
+        VERIFY_ARE_EQUAL(originalRed, gci.LookupAttributeColors(attrA).second);
     }
 
     Log::Comment(NoThrowString().Format(L"Create an alt buffer"));
@@ -2717,7 +2785,7 @@ void ScreenBufferTests::SetColorTableThreeDigits()
         const std::vector<TextAttribute> attrs{ attrRow->begin(), attrRow->end() };
         const auto attrA = attrs[0];
         LOG_ATTR(attrA);
-        VERIFY_ARE_EQUAL(originalRed, gci.LookupBackgroundColor(attrA));
+        VERIFY_ARE_EQUAL(originalRed, gci.LookupAttributeColors(attrA).second);
     }
 
     Log::Comment(NoThrowString().Format(L"Change the value of red to RGB(0x11, 0x22, 0x33)"));
@@ -2736,7 +2804,7 @@ void ScreenBufferTests::SetColorTableThreeDigits()
         const auto attrB = attrs[1];
         // TODO MSFT:20105972 - attrA and attrB should both be the same color now
         LOG_ATTR(attrB);
-        VERIFY_ARE_EQUAL(testColor, gci.LookupBackgroundColor(attrB));
+        VERIFY_ARE_EQUAL(testColor, gci.LookupAttributeColors(attrB).second);
     }
 }
 
@@ -3115,11 +3183,9 @@ void ScreenBufferTests::DontResetColorsAboveVirtualBottom()
         const auto attrB = attrs[1];
         LOG_ATTR(attrA);
         LOG_ATTR(attrB);
-        VERIFY_ARE_EQUAL(darkRed, gci.LookupForegroundColor(attrA));
-        VERIFY_ARE_EQUAL(darkBlue, gci.LookupBackgroundColor(attrA));
+        VERIFY_ARE_EQUAL(std::make_pair(darkRed, darkBlue), gci.LookupAttributeColors(attrA));
 
-        VERIFY_ARE_EQUAL(darkWhite, gci.LookupForegroundColor(attrB));
-        VERIFY_ARE_EQUAL(darkBlack, gci.LookupBackgroundColor(attrB));
+        VERIFY_ARE_EQUAL(std::make_pair(darkWhite, darkBlack), gci.LookupAttributeColors(attrB));
     }
 
     Log::Comment(NoThrowString().Format(L"Emulate scrolling up with the mouse"));
@@ -3150,14 +3216,11 @@ void ScreenBufferTests::DontResetColorsAboveVirtualBottom()
         LOG_ATTR(attrA);
         LOG_ATTR(attrB);
         LOG_ATTR(attrC);
-        VERIFY_ARE_EQUAL(darkRed, gci.LookupForegroundColor(attrA));
-        VERIFY_ARE_EQUAL(darkBlue, gci.LookupBackgroundColor(attrA));
+        VERIFY_ARE_EQUAL(std::make_pair(darkRed, darkBlue), gci.LookupAttributeColors(attrA));
 
-        VERIFY_ARE_EQUAL(darkWhite, gci.LookupForegroundColor(attrB));
-        VERIFY_ARE_EQUAL(darkBlack, gci.LookupBackgroundColor(attrB));
+        VERIFY_ARE_EQUAL(std::make_pair(darkWhite, darkBlack), gci.LookupAttributeColors(attrB));
 
-        VERIFY_ARE_EQUAL(darkWhite, gci.LookupForegroundColor(attrC));
-        VERIFY_ARE_EQUAL(darkBlack, gci.LookupBackgroundColor(attrC));
+        VERIFY_ARE_EQUAL(std::make_pair(darkWhite, darkBlack), gci.LookupAttributeColors(attrC));
     }
 }
 
@@ -3317,8 +3380,9 @@ void ScreenBufferTests::ScrollOperations()
 
     // Set the attributes that will be used to fill the revealed area.
     auto fillAttr = TextAttribute{ RGB(12, 34, 56), RGB(78, 90, 12) };
-    fillAttr.SetExtendedAttributes(ExtendedAttributes::CrossedOut);
-    fillAttr.SetMetaAttributes(COMMON_LVB_REVERSE_VIDEO | COMMON_LVB_UNDERSCORE);
+    fillAttr.SetCrossedOut(true);
+    fillAttr.SetReverseVideo(true);
+    fillAttr.SetUnderlined(true);
     si.SetAttributes(fillAttr);
     // But note that the meta attributes are expected to be cleared.
     auto expectedFillAttr = fillAttr;
@@ -3437,8 +3501,9 @@ void ScreenBufferTests::InsertChars()
 
     // Set the attributes that will be used to fill the revealed area.
     auto fillAttr = TextAttribute{ RGB(12, 34, 56), RGB(78, 90, 12) };
-    fillAttr.SetExtendedAttributes(ExtendedAttributes::CrossedOut);
-    fillAttr.SetMetaAttributes(COMMON_LVB_REVERSE_VIDEO | COMMON_LVB_UNDERSCORE);
+    fillAttr.SetCrossedOut(true);
+    fillAttr.SetReverseVideo(true);
+    fillAttr.SetUnderlined(true);
     si.SetAttributes(fillAttr);
     // But note that the meta attributes are expected to be cleared.
     auto expectedFillAttr = fillAttr;
@@ -3596,8 +3661,9 @@ void ScreenBufferTests::DeleteChars()
 
     // Set the attributes that will be used to fill the revealed area.
     auto fillAttr = TextAttribute{ RGB(12, 34, 56), RGB(78, 90, 12) };
-    fillAttr.SetExtendedAttributes(ExtendedAttributes::CrossedOut);
-    fillAttr.SetMetaAttributes(COMMON_LVB_REVERSE_VIDEO | COMMON_LVB_UNDERSCORE);
+    fillAttr.SetCrossedOut(true);
+    fillAttr.SetReverseVideo(true);
+    fillAttr.SetUnderlined(true);
     si.SetAttributes(fillAttr);
     // But note that the meta attributes are expected to be cleared.
     auto expectedFillAttr = fillAttr;
@@ -3730,7 +3796,7 @@ void ScreenBufferTests::EraseScrollbackTests()
     }
 
     // Set the colors to Green on Red. This should have no effect on the results.
-    si.SetAttributes({ FOREGROUND_GREEN | BACKGROUND_RED });
+    si.SetAttributes(TextAttribute{ FOREGROUND_GREEN | BACKGROUND_RED });
 
     // Place the cursor in the center.
     const short centerX = bufferWidth / 2;
@@ -3827,8 +3893,9 @@ void ScreenBufferTests::EraseTests()
 
     // Set the attributes that will be used to fill the erased area.
     auto fillAttr = TextAttribute{ RGB(12, 34, 56), RGB(78, 90, 12) };
-    fillAttr.SetExtendedAttributes(ExtendedAttributes::CrossedOut);
-    fillAttr.SetMetaAttributes(COMMON_LVB_REVERSE_VIDEO | COMMON_LVB_UNDERSCORE);
+    fillAttr.SetCrossedOut(true);
+    fillAttr.SetReverseVideo(true);
+    fillAttr.SetUnderlined(true);
     si.SetAttributes(fillAttr);
     // But note that the meta attributes are expected to be cleared.
     auto expectedFillAttr = fillAttr;
@@ -4425,14 +4492,14 @@ void ScreenBufferTests::ScrollLines256Colors()
     auto& cursor = si.GetTextBuffer().GetCursor();
 
     TextAttribute expectedAttr{ si.GetAttributes() };
-    std::wstring_view sgrSeq = L"\x1b[48;5;2m";
+    std::wstring_view sgrSeq = L"\x1b[42m";
     if (colorStyle == Use16Color)
     {
-        expectedAttr.SetBackground(gci.GetColorTableEntry(2));
+        expectedAttr.SetIndexedBackground(2);
     }
     else if (colorStyle == Use256Color)
     {
-        expectedAttr.SetBackground(gci.GetColorTableEntry(20));
+        expectedAttr.SetIndexedBackground256(20);
         sgrSeq = L"\x1b[48;5;20m";
     }
     else if (colorStyle == UseRGBColor)
@@ -4517,20 +4584,17 @@ void ScreenBufferTests::SetScreenMode()
 
     Log::Comment(L"By default the screen mode is normal.");
     VERIFY_IS_FALSE(gci.IsScreenReversed());
-    VERIFY_ARE_EQUAL(rgbForeground, gci.LookupForegroundColor(testAttr));
-    VERIFY_ARE_EQUAL(rgbBackground, gci.LookupBackgroundColor(testAttr));
+    VERIFY_ARE_EQUAL(std::make_pair(rgbForeground, rgbBackground), gci.LookupAttributeColors(testAttr));
 
     Log::Comment(L"When DECSCNM is set, background and foreground colors are switched.");
     stateMachine.ProcessString(L"\x1B[?5h");
     VERIFY_IS_TRUE(gci.IsScreenReversed());
-    VERIFY_ARE_EQUAL(rgbBackground, gci.LookupForegroundColor(testAttr));
-    VERIFY_ARE_EQUAL(rgbForeground, gci.LookupBackgroundColor(testAttr));
+    VERIFY_ARE_EQUAL(std::make_pair(rgbBackground, rgbForeground), gci.LookupAttributeColors(testAttr));
 
     Log::Comment(L"When DECSCNM is reset, the colors are normal again.");
     stateMachine.ProcessString(L"\x1B[?5l");
     VERIFY_IS_FALSE(gci.IsScreenReversed());
-    VERIFY_ARE_EQUAL(rgbForeground, gci.LookupForegroundColor(testAttr));
-    VERIFY_ARE_EQUAL(rgbBackground, gci.LookupBackgroundColor(testAttr));
+    VERIFY_ARE_EQUAL(std::make_pair(rgbForeground, rgbBackground), gci.LookupAttributeColors(testAttr));
 }
 
 void ScreenBufferTests::SetOriginMode()
@@ -4938,34 +5002,6 @@ void ScreenBufferTests::ClearAlternateBuffer()
     VerifyText(siMain.GetTextBuffer());
 }
 
-void ScreenBufferTests::InitializeTabStopsInVTMode()
-{
-    // This is a test for microsoft/terminal#411. Refer to that issue for more
-    // context.
-
-    // Run this test in isolation - Let's not pollute the VT level for other
-    // tests, or go blowing away other test's buffers
-    BEGIN_TEST_METHOD_PROPERTIES()
-        TEST_METHOD_PROPERTY(L"IsolationLevel", L"Method")
-    END_TEST_METHOD_PROPERTIES()
-
-    auto& g = ServiceLocator::LocateGlobals();
-    auto& gci = g.getConsoleInformation();
-
-    VERIFY_IS_FALSE(gci.GetActiveOutputBuffer().AreTabsSet());
-
-    // Enable VT mode before we construct the buffer. This emulates setting the
-    // VirtualTerminalLevel reg key before launching the console.
-    gci.SetVirtTermLevel(1);
-
-    // Clean up the old buffer, and re-create it. This new buffer will be
-    // created as if the VT mode was always on.
-    m_state->CleanupGlobalScreenBuffer();
-    m_state->PrepareGlobalScreenBuffer();
-
-    VERIFY_IS_TRUE(gci.GetActiveOutputBuffer().AreTabsSet());
-}
-
 void ScreenBufferTests::TestExtendedTextAttributes()
 {
     // This is a test for microsoft/terminal#2554. Refer to that issue for more
@@ -4978,14 +5014,16 @@ void ScreenBufferTests::TestExtendedTextAttributes()
     // Run this test for each and every possible combination of states.
     BEGIN_TEST_METHOD_PROPERTIES()
         TEST_METHOD_PROPERTY(L"Data:bold", L"{false, true}")
+        TEST_METHOD_PROPERTY(L"Data:faint", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:italics", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:blink", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:invisible", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:crossedOut", L"{false, true}")
     END_TEST_METHOD_PROPERTIES()
 
-    bool bold, italics, blink, invisible, crossedOut;
+    bool bold, faint, italics, blink, invisible, crossedOut;
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"bold", bold));
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"faint", faint));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"italics", italics));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"blink", blink));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"invisible", invisible));
@@ -5006,6 +5044,11 @@ void ScreenBufferTests::TestExtendedTextAttributes()
     {
         WI_SetFlag(expectedAttrs, ExtendedAttributes::Bold);
         vtSeq += L"\x1b[1m";
+    }
+    if (faint)
+    {
+        WI_SetFlag(expectedAttrs, ExtendedAttributes::Faint);
+        vtSeq += L"\x1b[2m";
     }
     if (italics)
     {
@@ -5064,9 +5107,10 @@ void ScreenBufferTests::TestExtendedTextAttributes()
 
     // One-by-one, turn off each of these states with VT, then check that the
     // state matched.
-    if (bold)
+    if (bold || faint)
     {
-        WI_ClearFlag(expectedAttrs, ExtendedAttributes::Bold);
+        // The bold and faint attributes share the same reset sequence.
+        WI_ClearAllFlags(expectedAttrs, ExtendedAttributes::Bold | ExtendedAttributes::Faint);
         vtSeq = L"\x1b[22m";
         validate(expectedAttrs, vtSeq);
     }
@@ -5111,6 +5155,7 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
     // Run this test for each and every possible combination of states.
     BEGIN_TEST_METHOD_PROPERTIES()
         TEST_METHOD_PROPERTY(L"Data:bold", L"{false, true}")
+        TEST_METHOD_PROPERTY(L"Data:faint", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:italics", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:blink", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:invisible", L"{false, true}")
@@ -5126,8 +5171,9 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
     const int Use256Color = 2;
     const int UseRGBColor = 3;
 
-    bool bold, italics, blink, invisible, crossedOut;
+    bool bold, faint, italics, blink, invisible, crossedOut;
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"bold", bold));
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"faint", faint));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"italics", italics));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"blink", blink));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"invisible", invisible));
@@ -5145,33 +5191,37 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
     auto& cursor = tbi.GetCursor();
 
     TextAttribute expectedAttr{ si.GetAttributes() };
-    ExtendedAttributes expectedExtendedAttrs{ ExtendedAttributes::Normal };
     std::wstring vtSeq = L"";
 
     // Collect up a VT sequence to set the state given the method properties
     if (bold)
     {
-        WI_SetFlag(expectedExtendedAttrs, ExtendedAttributes::Bold);
+        expectedAttr.SetBold(true);
         vtSeq += L"\x1b[1m";
+    }
+    if (faint)
+    {
+        expectedAttr.SetFaint(true);
+        vtSeq += L"\x1b[2m";
     }
     if (italics)
     {
-        WI_SetFlag(expectedExtendedAttrs, ExtendedAttributes::Italics);
+        expectedAttr.SetItalic(true);
         vtSeq += L"\x1b[3m";
     }
     if (blink)
     {
-        WI_SetFlag(expectedExtendedAttrs, ExtendedAttributes::Blinking);
+        expectedAttr.SetBlinking(true);
         vtSeq += L"\x1b[5m";
     }
     if (invisible)
     {
-        WI_SetFlag(expectedExtendedAttrs, ExtendedAttributes::Invisible);
+        expectedAttr.SetInvisible(true);
         vtSeq += L"\x1b[8m";
     }
     if (crossedOut)
     {
-        WI_SetFlag(expectedExtendedAttrs, ExtendedAttributes::CrossedOut);
+        expectedAttr.SetCrossedOut(true);
         vtSeq += L"\x1b[9m";
     }
 
@@ -5183,12 +5233,12 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
     }
     else if (setForegroundType == Use16Color)
     {
-        expectedAttr.SetIndexedAttributes({ static_cast<BYTE>(2) }, std::nullopt);
+        expectedAttr.SetIndexedForeground(2);
         vtSeq += L"\x1b[32m";
     }
     else if (setForegroundType == Use256Color)
     {
-        expectedAttr.SetForeground(gci.GetColorTableEntry(20));
+        expectedAttr.SetIndexedForeground256(20);
         vtSeq += L"\x1b[38;5;20m";
     }
     else if (setForegroundType == UseRGBColor)
@@ -5205,12 +5255,12 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
     }
     else if (setBackgroundType == Use16Color)
     {
-        expectedAttr.SetIndexedAttributes(std::nullopt, { static_cast<BYTE>(2) });
+        expectedAttr.SetIndexedBackground(2);
         vtSeq += L"\x1b[42m";
     }
     else if (setBackgroundType == Use256Color)
     {
-        expectedAttr.SetBackground(gci.GetColorTableEntry(20));
+        expectedAttr.SetIndexedBackground256(20);
         vtSeq += L"\x1b[48;5;20m";
     }
     else if (setBackgroundType == UseRGBColor)
@@ -5218,8 +5268,6 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
         expectedAttr.SetBackground(RGB(1, 2, 3));
         vtSeq += L"\x1b[48;2;1;2;3m";
     }
-
-    expectedAttr.SetExtendedAttributes(expectedExtendedAttrs);
 
     // Helper lambda to write a VT sequence, then an "X", then check that the
     // attributes of the "X" match what we think they should be.
@@ -5257,38 +5305,35 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
 
     // One-by-one, turn off each of these states with VT, then check that the
     // state matched.
-    if (bold)
+    if (bold || faint)
     {
-        WI_ClearFlag(expectedExtendedAttrs, ExtendedAttributes::Bold);
-        expectedAttr.SetExtendedAttributes(expectedExtendedAttrs);
+        // The bold and faint attributes share the same reset sequence.
+        expectedAttr.SetBold(false);
+        expectedAttr.SetFaint(false);
         vtSeq = L"\x1b[22m";
         validate(expectedAttr, vtSeq);
     }
     if (italics)
     {
-        WI_ClearFlag(expectedExtendedAttrs, ExtendedAttributes::Italics);
-        expectedAttr.SetExtendedAttributes(expectedExtendedAttrs);
+        expectedAttr.SetItalic(false);
         vtSeq = L"\x1b[23m";
         validate(expectedAttr, vtSeq);
     }
     if (blink)
     {
-        WI_ClearFlag(expectedExtendedAttrs, ExtendedAttributes::Blinking);
-        expectedAttr.SetExtendedAttributes(expectedExtendedAttrs);
+        expectedAttr.SetBlinking(false);
         vtSeq = L"\x1b[25m";
         validate(expectedAttr, vtSeq);
     }
     if (invisible)
     {
-        WI_ClearFlag(expectedExtendedAttrs, ExtendedAttributes::Invisible);
-        expectedAttr.SetExtendedAttributes(expectedExtendedAttrs);
+        expectedAttr.SetInvisible(false);
         vtSeq = L"\x1b[28m";
         validate(expectedAttr, vtSeq);
     }
     if (crossedOut)
     {
-        WI_ClearFlag(expectedExtendedAttrs, ExtendedAttributes::CrossedOut);
-        expectedAttr.SetExtendedAttributes(expectedExtendedAttrs);
+        expectedAttr.SetCrossedOut(false);
         vtSeq = L"\x1b[29m";
         validate(expectedAttr, vtSeq);
     }
@@ -5743,7 +5788,8 @@ void ScreenBufferTests::ScreenAlignmentPattern()
 
     // Set the initial attributes.
     auto initialAttr = TextAttribute{ RGB(12, 34, 56), RGB(78, 90, 12) };
-    initialAttr.SetMetaAttributes(COMMON_LVB_REVERSE_VIDEO | COMMON_LVB_UNDERSCORE);
+    initialAttr.SetReverseVideo(true);
+    initialAttr.SetUnderlined(true);
     si.SetAttributes(initialAttr);
 
     // Set some margins.
@@ -5774,7 +5820,7 @@ void ScreenBufferTests::ScreenAlignmentPattern()
 
     Log::Comment(L"Meta/rendition attributes should be reset.");
     auto expectedAttr = initialAttr;
-    expectedAttr.SetMetaAttributes(0);
+    expectedAttr.SetStandardErase();
     VERIFY_ARE_EQUAL(expectedAttr, si.GetAttributes());
 }
 
@@ -5827,4 +5873,173 @@ void ScreenBufferTests::TestCursorIsOn()
     VERIFY_IS_TRUE(cursor.IsOn());
     VERIFY_IS_FALSE(cursor.IsBlinkingAllowed());
     VERIFY_IS_FALSE(cursor.IsVisible());
+}
+
+void ScreenBufferTests::UpdateVirtualBottomWhenCursorMovesBelowIt()
+{
+    auto& g = ServiceLocator::LocateGlobals();
+    auto& gci = g.getConsoleInformation();
+    auto& si = gci.GetActiveOutputBuffer();
+    auto& cursor = si.GetTextBuffer().GetCursor();
+
+    Log::Comment(L"Make sure the initial virtual bottom is at the bottom of the viewport");
+    si.UpdateBottom();
+    const auto initialVirtualBottom = si.GetViewport().BottomInclusive();
+    VERIFY_ARE_EQUAL(initialVirtualBottom, si._virtualBottom);
+
+    Log::Comment(L"Set the initial cursor position on that virtual bottom line");
+    const auto initialCursorPos = COORD{ 0, initialVirtualBottom };
+    cursor.SetPosition(initialCursorPos);
+    VERIFY_ARE_EQUAL(initialCursorPos, cursor.GetPosition());
+
+    Log::Comment(L"Pan down so the initial viewport has the cursor in the middle");
+    const auto initialOrigin = COORD{ 0, si.GetViewport().Top() + si.GetViewport().Height() / 2 };
+    gci.SetTerminalScrolling(false);
+    VERIFY_SUCCEEDED(si.SetViewportOrigin(false, initialOrigin, false));
+    VERIFY_ARE_EQUAL(initialOrigin, si.GetViewport().Origin());
+
+    Log::Comment(L"Confirm that the virtual bottom has not changed");
+    VERIFY_ARE_EQUAL(initialVirtualBottom, si._virtualBottom);
+
+    Log::Comment(L"Now write several lines of content using WriteCharsLegacy");
+    const auto content = L"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n";
+    auto numBytes = wcslen(content) * sizeof(wchar_t);
+    VERIFY_SUCCESS_NTSTATUS(WriteCharsLegacy(si, content, content, content, &numBytes, nullptr, 0, 0, nullptr));
+
+    Log::Comment(L"Confirm that the cursor position has moved down 10 lines");
+    const auto newCursorPos = COORD{ initialCursorPos.X, initialCursorPos.Y + 10 };
+    VERIFY_ARE_EQUAL(newCursorPos, cursor.GetPosition());
+
+    Log::Comment(L"Confirm that the virtual bottom matches that new cursor position");
+    const auto newVirtualBottom = newCursorPos.Y;
+    VERIFY_ARE_EQUAL(newVirtualBottom, si._virtualBottom);
+
+    Log::Comment(L"The viewport itself should not have changed at this point");
+    VERIFY_ARE_EQUAL(initialOrigin, si.GetViewport().Origin());
+
+    Log::Comment(L"But after MoveToBottom, the viewport should align with the new virtual bottom");
+    si.MoveToBottom();
+    VERIFY_ARE_EQUAL(newVirtualBottom, si.GetViewport().BottomInclusive());
+}
+
+void ScreenBufferTests::TestWriteConsoleVTQuirkMode()
+{
+    BEGIN_TEST_METHOD_PROPERTIES()
+        TEST_METHOD_PROPERTY(L"Data:useQuirk", L"{false, true}")
+    END_TEST_METHOD_PROPERTIES()
+
+    bool useQuirk;
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"useQuirk", useQuirk), L"whether to enable the quirk");
+
+    CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
+    gci.LockConsole(); // Lock must be taken to manipulate buffer.
+    auto unlock = wil::scope_exit([&] { gci.UnlockConsole(); });
+
+    auto& mainBuffer = gci.GetActiveOutputBuffer();
+    auto& cursor = mainBuffer.GetTextBuffer().GetCursor();
+    // Make sure we're in VT mode
+    WI_SetFlag(mainBuffer.OutputMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+
+    const TextAttribute defaultAttribute{};
+    // Make sure we're using the default attributes at the start of the test,
+    // Otherwise they could be polluted from a previous test.
+    mainBuffer.SetAttributes(defaultAttribute);
+
+    const auto verifyLastAttribute = [&](const TextAttribute& expected) {
+        const ROW& row = mainBuffer.GetTextBuffer().GetRowByOffset(cursor.GetPosition().Y);
+        const auto attrRow = &row.GetAttrRow();
+        auto iter{ attrRow->begin() };
+        iter += cursor.GetPosition().X - 1;
+        VERIFY_ARE_EQUAL(expected, *iter);
+    };
+
+    std::unique_ptr<WriteData> waiter;
+
+    std::wstring seq{};
+    size_t seqCb{ 0 };
+
+    /* Write red on blue, verify that it comes through */
+    {
+        TextAttribute vtRedOnBlueAttribute{};
+        vtRedOnBlueAttribute.SetForeground(TextColor{ gsl::narrow_cast<BYTE>(XtermToWindowsIndex(1)), false });
+        vtRedOnBlueAttribute.SetBackground(TextColor{ gsl::narrow_cast<BYTE>(XtermToWindowsIndex(4)), false });
+
+        seq = L"\x1b[31;44m";
+        seqCb = 2 * seq.size();
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, useQuirk, waiter));
+
+        VERIFY_ARE_EQUAL(vtRedOnBlueAttribute, mainBuffer.GetAttributes());
+
+        seq = L"X";
+        seqCb = 2 * seq.size();
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, useQuirk, waiter));
+
+        verifyLastAttribute(vtRedOnBlueAttribute);
+    }
+
+    /* Write white on black, verify that it acts as expected for the quirk mode */
+    {
+        TextAttribute vtWhiteOnBlackAttribute{};
+        vtWhiteOnBlackAttribute.SetForeground(TextColor{ gsl::narrow_cast<BYTE>(XtermToWindowsIndex(7)), false });
+        vtWhiteOnBlackAttribute.SetBackground(TextColor{ gsl::narrow_cast<BYTE>(XtermToWindowsIndex(0)), false });
+
+        const TextAttribute quirkExpectedAttribute{ useQuirk ? defaultAttribute : vtWhiteOnBlackAttribute };
+
+        seq = L"\x1b[37;40m"; // the quirk should suppress this, turning it into "defaults"
+        seqCb = 2 * seq.size();
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, useQuirk, waiter));
+
+        VERIFY_ARE_EQUAL(quirkExpectedAttribute, mainBuffer.GetAttributes());
+
+        seq = L"X";
+        seqCb = 2 * seq.size();
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, useQuirk, waiter));
+
+        verifyLastAttribute(quirkExpectedAttribute);
+    }
+
+    /* Write bright white on black, verify that it acts as expected for the quirk mode */
+    {
+        TextAttribute vtBrightWhiteOnBlackAttribute{};
+        vtBrightWhiteOnBlackAttribute.SetForeground(TextColor{ gsl::narrow_cast<BYTE>(XtermToWindowsIndex(7)), false });
+        vtBrightWhiteOnBlackAttribute.SetBackground(TextColor{ gsl::narrow_cast<BYTE>(XtermToWindowsIndex(0)), false });
+        vtBrightWhiteOnBlackAttribute.SetBold(true);
+
+        TextAttribute vtBrightWhiteOnDefaultAttribute{ vtBrightWhiteOnBlackAttribute }; // copy the above attribute
+        vtBrightWhiteOnDefaultAttribute.SetDefaultBackground();
+
+        const TextAttribute quirkExpectedAttribute{ useQuirk ? vtBrightWhiteOnDefaultAttribute : vtBrightWhiteOnBlackAttribute };
+
+        seq = L"\x1b[1;37;40m"; // the quirk should suppress black only, turning it into "default background"
+        seqCb = 2 * seq.size();
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, useQuirk, waiter));
+
+        VERIFY_ARE_EQUAL(quirkExpectedAttribute, mainBuffer.GetAttributes());
+
+        seq = L"X";
+        seqCb = 2 * seq.size();
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, useQuirk, waiter));
+
+        verifyLastAttribute(quirkExpectedAttribute);
+    }
+
+    /* Write a 256-color white on a 256-color black, make sure the quirk does not suppress it */
+    {
+        TextAttribute vtWhiteOnBlack256Attribute{};
+        vtWhiteOnBlack256Attribute.SetForeground(TextColor{ gsl::narrow_cast<BYTE>(XtermToWindowsIndex(7)), true });
+        vtWhiteOnBlack256Attribute.SetBackground(TextColor{ gsl::narrow_cast<BYTE>(XtermToWindowsIndex(0)), true });
+
+        // reset (disable bold from the last test) before setting both colors
+        seq = L"\x1b[m\x1b[38;5;7;48;5;0m"; // the quirk should *not* suppress this (!)
+        seqCb = 2 * seq.size();
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, useQuirk, waiter));
+
+        VERIFY_ARE_EQUAL(vtWhiteOnBlack256Attribute, mainBuffer.GetAttributes());
+
+        seq = L"X";
+        seqCb = 2 * seq.size();
+        VERIFY_SUCCEEDED(DoWriteConsole(&seq[0], &seqCb, mainBuffer, useQuirk, waiter));
+
+        verifyLastAttribute(vtWhiteOnBlack256Attribute);
+    }
 }

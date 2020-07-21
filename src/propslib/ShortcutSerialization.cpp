@@ -290,7 +290,7 @@ void ShortcutSerialization::s_GetLinkTitle(_In_ PCWSTR pwszShortcutFilename,
     *ppsl = nullptr;
     *ppPf = nullptr;
     IShellLink* psl;
-    HRESULT hr = SHCoCreateInstance(NULL, &CLSID_ShellLink, NULL, IID_PPV_ARGS(&psl));
+    HRESULT hr = SHCoCreateInstance(nullptr, &CLSID_ShellLink, nullptr, IID_PPV_ARGS(&psl));
     if (SUCCEEDED(hr))
     {
         IPersistFile* pPf;
@@ -344,6 +344,8 @@ void ShortcutSerialization::s_GetLinkTitle(_In_ PCWSTR pwszShortcutFilename,
                                                               _Out_ BOOL* const pfReadConsoleProperties,
                                                               _Out_writes_opt_(cchShortcutTitle) PWSTR pwszShortcutTitle,
                                                               const size_t cchShortcutTitle,
+                                                              _Out_writes_opt_(cchLinkTarget) PWSTR pwszLinkTarget,
+                                                              const size_t cchLinkTarget,
                                                               _Out_writes_opt_(cchIconLocation) PWSTR pwszIconLocation,
                                                               const size_t cchIconLocation,
                                                               _Out_opt_ int* const piIcon,
@@ -355,6 +357,11 @@ void ShortcutSerialization::s_GetLinkTitle(_In_ PCWSTR pwszShortcutFilename,
     if (pwszShortcutTitle && cchShortcutTitle > 0)
     {
         pwszShortcutTitle[0] = L'\0';
+    }
+
+    if (pwszLinkTarget && cchLinkTarget > 0)
+    {
+        pwszLinkTarget[0] = L'\0';
     }
 
     if (pwszIconLocation && cchIconLocation > 0)
@@ -374,7 +381,12 @@ void ShortcutSerialization::s_GetLinkTitle(_In_ PCWSTR pwszShortcutFilename,
             s_GetLinkTitle(pStateInfo->LinkTitle, pwszShortcutTitle, cchShortcutTitle);
         }
 
-        if (pwszIconLocation && piIcon)
+        if (pwszLinkTarget)
+        {
+            hr = psl->GetPath(pwszLinkTarget, static_cast<int>(cchLinkTarget), NULL, 0);
+        }
+
+        if (SUCCEEDED(hr) && pwszIconLocation && piIcon)
         {
             hr = psl->GetIconLocation(pwszIconLocation, static_cast<int>(cchIconLocation), piIcon);
         }
@@ -517,7 +529,7 @@ void ShortcutSerialization::s_GetLinkTitle(_In_ PCWSTR pwszShortcutFilename,
         if (SUCCEEDED(hr))
         {
             // Only persist changes if we've successfully made them.
-            hr = ppf->Save(NULL, TRUE);
+            hr = ppf->Save(nullptr, TRUE);
         }
 
         ppf->Release();

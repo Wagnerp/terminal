@@ -73,6 +73,11 @@ namespace Microsoft.Terminal.Wpf
         internal int Columns { get; private set; }
 
         /// <summary>
+        /// Gets the window handle of the terminal.
+        /// </summary>
+        internal IntPtr Hwnd => this.hwnd;
+
+        /// <summary>
         /// Sets the connection to the terminal backend.
         /// </summary>
         internal ITerminalConnection Connection
@@ -172,7 +177,6 @@ namespace Microsoft.Terminal.Wpf
         protected override HandleRef BuildWindowCore(HandleRef hwndParent)
         {
             var dpiScale = VisualTreeHelper.GetDpi(this);
-
             NativeMethods.CreateTerminal(hwndParent.Handle, out this.hwnd, out this.terminal);
 
             this.scrollCallback = this.OnScroll;
@@ -219,9 +223,11 @@ namespace Microsoft.Terminal.Wpf
                 switch ((NativeMethods.WindowMessage)msg)
                 {
                     case NativeMethods.WindowMessage.WM_SETFOCUS:
+                        NativeMethods.TerminalSetFocus(this.terminal);
                         this.blinkTimer?.Start();
                         break;
                     case NativeMethods.WindowMessage.WM_KILLFOCUS:
+                        NativeMethods.TerminalKillFocus(this.terminal);
                         this.blinkTimer?.Stop();
                         NativeMethods.TerminalSetCursorVisible(this.terminal, false);
                         break;
@@ -229,32 +235,35 @@ namespace Microsoft.Terminal.Wpf
                         this.Focus();
                         NativeMethods.SetFocus(this.hwnd);
                         break;
-                    case NativeMethods.WindowMessage.WM_LBUTTONDOWN:
-                        this.LeftClickHandler((int)lParam);
-                        break;
-                    case NativeMethods.WindowMessage.WM_RBUTTONDOWN:
-                        if (NativeMethods.TerminalIsSelectionActive(this.terminal))
+                    case NativeMethods.WindowMessage.WM_SYSKEYDOWN: // fallthrough
+                    case NativeMethods.WindowMessage.WM_KEYDOWN:
                         {
-                            Clipboard.SetText(NativeMethods.TerminalGetSelection(this.terminal));
-                        }
-                        else
-                        {
-                            this.connection.WriteInput(Clipboard.GetText());
+                            // WM_KEYDOWN lParam layout documentation: https://docs.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
+                            NativeMethods.TerminalSetCursorVisible(this.terminal, true);
+                            ulong scanCode = (((ulong)lParam) & 0x00FF0000) >> 16;
+
+                            NativeMethods.TerminalSendKeyEvent(this.terminal, (ushort)wParam, (ushort)scanCode, true);
+                            this.blinkTimer?.Start();
+                            break;
                         }
 
-                        break;
-                    case NativeMethods.WindowMessage.WM_MOUSEMOVE:
-                        this.MouseMoveHandler((int)wParam, (int)lParam);
-                        break;
-                    case NativeMethods.WindowMessage.WM_KEYDOWN:
-                        NativeMethods.TerminalSetCursorVisible(this.terminal, true);
-                        NativeMethods.TerminalClearSelection(this.terminal);
-                        NativeMethods.TerminalSendKeyEvent(this.terminal, wParam);
-                        this.blinkTimer?.Start();
-                        break;
+                    case NativeMethods.WindowMessage.WM_SYSKEYUP: // fallthrough
+                    case NativeMethods.WindowMessage.WM_KEYUP:
+                        {
+                            // WM_KEYUP lParam layout documentation: https://docs.microsoft.com/en-us/windows/win32/inputdev/wm-keyup
+                            ulong scanCode = (((ulong)lParam) & 0x00FF0000) >> 16;
+                            NativeMethods.TerminalSendKeyEvent(this.terminal, (ushort)wParam, (ushort)scanCode, false);
+                            break;
+                        }
+
                     case NativeMethods.WindowMessage.WM_CHAR:
-                        NativeMethods.TerminalSendCharEvent(this.terminal, (char)wParam);
-                        break;
+                        {
+                            // WM_CHAR lParam layout documentation: https://docs.microsoft.com/en-us/windows/win32/inputdev/wm-char
+                            ulong scanCode = (((ulong)lParam) & 0x00FF0000) >> 16;
+                            NativeMethods.TerminalSendCharEvent(this.terminal, (char)wParam, (ushort)scanCode);
+                            break;
+                        }
+
                     case NativeMethods.WindowMessage.WM_WINDOWPOSCHANGED:
                         var windowpos = (NativeMethods.WINDOWPOS)Marshal.PtrToStructure(lParam, typeof(NativeMethods.WINDOWPOS));
                         if (((NativeMethods.SetWindowPosFlags)windowpos.flags).HasFlag(NativeMethods.SetWindowPosFlags.SWP_NOSIZE))
@@ -270,7 +279,7 @@ namespace Microsoft.Terminal.Wpf
 
                         break;
                     case NativeMethods.WindowMessage.WM_MOUSEWHEEL:
-                        var delta = ((int)wParam) >> 16;
+                        var delta = (short)(((long)wParam) >> 16);
                         this.UserScrolled?.Invoke(this, delta);
                         break;
                 }

@@ -21,6 +21,12 @@ Abstract:
 
 namespace Microsoft::Console::VirtualTerminal
 {
+    // The DEC STD 070 reference recommends supporting up to at least 16384 for
+    // parameter values, so 32767 should be more than enough. At most we might
+    // want to increase this to 65535, since that is what XTerm and VTE support,
+    // but for now 32767 is the safest limit for our existing code base.
+    constexpr size_t MAX_PARAMETER_VALUE = 32767;
+
     class StateMachine final
     {
 #ifdef UNIT_TESTING
@@ -30,6 +36,8 @@ namespace Microsoft::Console::VirtualTerminal
 
     public:
         StateMachine(std::unique_ptr<IStateMachineEngine> engine);
+
+        void SetAnsiMode(bool ansiMode) noexcept;
 
         void ProcessCharacter(const wchar_t wch);
         void ProcessString(const std::wstring_view string);
@@ -46,10 +54,11 @@ namespace Microsoft::Console::VirtualTerminal
         void _ActionExecuteFromEscape(const wchar_t wch);
         void _ActionPrint(const wchar_t wch);
         void _ActionEscDispatch(const wchar_t wch);
+        void _ActionVt52EscDispatch(const wchar_t wch);
         void _ActionCollect(const wchar_t wch);
         void _ActionParam(const wchar_t wch);
         void _ActionCsiDispatch(const wchar_t wch);
-        void _ActionOscParam(const wchar_t wch);
+        void _ActionOscParam(const wchar_t wch) noexcept;
         void _ActionOscPut(const wchar_t wch);
         void _ActionOscDispatch(const wchar_t wch);
         void _ActionSs3Dispatch(const wchar_t wch);
@@ -69,6 +78,7 @@ namespace Microsoft::Console::VirtualTerminal
         void _EnterOscTermination() noexcept;
         void _EnterSs3Entry();
         void _EnterSs3Param() noexcept;
+        void _EnterVt52Param() noexcept;
 
         void _EventGround(const wchar_t wch);
         void _EventEscape(const wchar_t wch);
@@ -77,13 +87,14 @@ namespace Microsoft::Console::VirtualTerminal
         void _EventCsiIntermediate(const wchar_t wch);
         void _EventCsiIgnore(const wchar_t wch);
         void _EventCsiParam(const wchar_t wch);
-        void _EventOscParam(const wchar_t wch);
+        void _EventOscParam(const wchar_t wch) noexcept;
         void _EventOscString(const wchar_t wch);
         void _EventOscTermination(const wchar_t wch);
         void _EventSs3Entry(const wchar_t wch);
         void _EventSs3Param(const wchar_t wch);
+        void _EventVt52Param(const wchar_t wch);
 
-        void _AccumulateTo(const wchar_t wch, size_t& value);
+        void _AccumulateTo(const wchar_t wch, size_t& value) noexcept;
 
         enum class VTStates
         {
@@ -98,7 +109,8 @@ namespace Microsoft::Console::VirtualTerminal
             OscString,
             OscTermination,
             Ss3Entry,
-            Ss3Param
+            Ss3Param,
+            Vt52Param
         };
 
         Microsoft::Console::VirtualTerminal::ParserTracing _trace;
@@ -107,6 +119,8 @@ namespace Microsoft::Console::VirtualTerminal
 
         VTStates _state;
 
+        bool _isInAnsiMode;
+
         std::wstring_view _run;
 
         std::vector<wchar_t> _intermediates;
@@ -114,6 +128,8 @@ namespace Microsoft::Console::VirtualTerminal
 
         std::wstring _oscString;
         size_t _oscParameter;
+
+        std::optional<std::wstring> _cachedSequence;
 
         // This is tracked per state machine instance so that separate calls to Process*
         //   can start and finish a sequence.

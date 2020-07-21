@@ -44,7 +44,7 @@ class CommandLineTests
         m_state->PrepareGlobalInputBuffer();
         m_state->PrepareReadHandle();
         m_state->PrepareCookedReadData();
-        m_pHistory = CommandHistory::s_Allocate(L"cmd.exe", (HANDLE)0);
+        m_pHistory = CommandHistory::s_Allocate(L"cmd.exe", nullptr);
         if (!m_pHistory)
         {
             return false;
@@ -54,7 +54,7 @@ class CommandLineTests
 
     TEST_METHOD_CLEANUP(MethodCleanup)
     {
-        CommandHistory::s_Free((HANDLE)0);
+        CommandHistory::s_Free(nullptr);
         m_pHistory = nullptr;
         m_state->CleanupCookedReadData();
         m_state->CleanupReadHandle();
@@ -67,10 +67,7 @@ class CommandLineTests
     {
         const auto span = cookedReadData.SpanWholeBuffer();
         VERIFY_ARE_EQUAL(cookedReadData._bytesRead, wstr.size() * sizeof(wchar_t));
-        for (size_t i = 0; i < wstr.size(); ++i)
-        {
-            VERIFY_ARE_EQUAL(span.at(i), wstr.at(i));
-        }
+        VERIFY_ARE_EQUAL(wstr, (std::wstring_view{ span.data(), cookedReadData._bytesRead / sizeof(wchar_t) }));
     }
 
     void InitCookedReadData(COOKED_READ_DATA& cookedReadData,

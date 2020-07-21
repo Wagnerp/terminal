@@ -62,25 +62,6 @@ public:
     bool GetConsoleCursorInfo(CONSOLE_CURSOR_INFO& cursorInfo) const override;
     bool SetConsoleCursorInfo(const CONSOLE_CURSOR_INFO& cursorInfo) override;
 
-    bool SetConsoleTextAttribute(const WORD attr) override;
-
-    bool PrivateSetLegacyAttributes(const WORD attr,
-                                    const bool foreground,
-                                    const bool background,
-                                    const bool meta) override;
-
-    bool PrivateSetDefaultAttributes(const bool foreground,
-                                     const bool background) override;
-
-    bool SetConsoleXtermTextAttribute(const int xtermTableEntry,
-                                      const bool isForeground) override;
-
-    bool SetConsoleRGBTextAttribute(const COLORREF rgbColor,
-                                    const bool isForeground) override;
-
-    bool PrivateBoldText(const bool bolded) override;
-    bool PrivateGetExtendedTextAttributes(ExtendedAttributes& attrs) override;
-    bool PrivateSetExtendedTextAttributes(const ExtendedAttributes attrs) override;
     bool PrivateGetTextAttributes(TextAttribute& attrs) const override;
     bool PrivateSetTextAttributes(const TextAttribute& attrs) override;
 
@@ -92,7 +73,9 @@ public:
 
     bool PrivateSetCursorKeysMode(const bool applicationMode) override;
     bool PrivateSetKeypadMode(const bool applicationMode) override;
+    bool PrivateEnableWin32InputMode(const bool win32InputMode) override;
 
+    bool PrivateSetAnsiMode(const bool ansiMode) override;
     bool PrivateSetScreenMode(const bool reverseMode) override;
     bool PrivateSetAutoWrapMode(const bool wrapAtEOL) override;
 
@@ -113,12 +96,6 @@ public:
 
     bool PrivateUseMainScreenBuffer() override;
 
-    bool PrivateHorizontalTabSet();
-    bool PrivateForwardTab(const size_t numTabs) override;
-    bool PrivateBackwardsTab(const size_t numTabs) override;
-    bool PrivateTabClear(const bool clearAll) override;
-    bool PrivateSetDefaultTabStops() override;
-
     bool PrivateEnableVT200MouseMode(const bool enabled) override;
     bool PrivateEnableUTF8ExtendedMouseMode(const bool enabled) override;
     bool PrivateEnableSGRExtendedMouseMode(const bool enabled) override;
@@ -126,8 +103,6 @@ public:
     bool PrivateEnableAnyEventMouseMode(const bool enabled) override;
     bool PrivateEnableAlternateScroll(const bool enabled) override;
     bool PrivateEraseAll() override;
-
-    bool PrivateGetConsoleScreenBufferAttributes(WORD& attributes) override;
 
     bool PrivatePrependConsoleInput(std::deque<std::unique_ptr<IInputEvent>>& events,
                                     size_t& eventsWritten) override;
@@ -141,16 +116,18 @@ public:
 
     bool PrivateWriteConsoleControlInput(const KeyEvent key) override;
 
+    bool SetConsoleOutputCP(const unsigned int codepage) override;
     bool GetConsoleOutputCP(unsigned int& codepage) override;
 
-    bool IsConsolePty(bool& isPty) const override;
+    bool IsConsolePty() const override;
 
     bool DeleteLines(const size_t count) override;
     bool InsertLines(const size_t count) override;
 
     bool MoveToBottom() const override;
 
-    bool PrivateSetColorTableEntry(const short index, const COLORREF value) const noexcept override;
+    bool PrivateGetColorTableEntry(const size_t index, COLORREF& value) const noexcept override;
+    bool PrivateSetColorTableEntry(const size_t index, const COLORREF value) const noexcept override;
 
     bool PrivateSetDefaultForeground(const COLORREF value) const noexcept override;
 
@@ -165,6 +142,8 @@ public:
                              const std::optional<SMALL_RECT> clipRect,
                              const COORD destinationOrigin,
                              const bool standardFillAttrs) noexcept override;
+
+    bool PrivateIsVtInputEnabled() const override;
 
 private:
     Microsoft::Console::IIoProvider& _io;

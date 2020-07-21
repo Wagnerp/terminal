@@ -258,9 +258,10 @@ bool WddmConEngine::IsInitialized()
     return S_OK;
 }
 
-[[nodiscard]] HRESULT WddmConEngine::PaintBufferLine(std::basic_string_view<Cluster> const clusters,
+[[nodiscard]] HRESULT WddmConEngine::PaintBufferLine(gsl::span<const Cluster> const clusters,
                                                      const COORD coord,
-                                                     const bool /*trimLeft*/) noexcept
+                                                     const bool /*trimLeft*/,
+                                                     const bool /*lineWrapped*/) noexcept
 {
     try
     {
@@ -299,18 +300,16 @@ bool WddmConEngine::IsInitialized()
     return S_OK;
 }
 
-[[nodiscard]] HRESULT WddmConEngine::PaintCursor(const IRenderEngine::CursorOptions& /*options*/) noexcept
+[[nodiscard]] HRESULT WddmConEngine::PaintCursor(const CursorOptions& /*options*/) noexcept
 {
     return S_OK;
 }
 
-[[nodiscard]] HRESULT WddmConEngine::UpdateDrawingBrushes(COLORREF const /*colorForeground*/,
-                                                          COLORREF const /*colorBackground*/,
-                                                          const WORD legacyColorAttribute,
-                                                          const ExtendedAttributes /*extendedAttrs*/,
+[[nodiscard]] HRESULT WddmConEngine::UpdateDrawingBrushes(const TextAttribute& textAttributes,
+                                                          const gsl::not_null<IRenderData*> /*pData*/,
                                                           bool const /*isSettingDefaultBrushes*/) noexcept
 {
-    _currentLegacyColorAttribute = legacyColorAttribute;
+    _currentLegacyColorAttribute = textAttributes.GetLegacyAttributes();
 
     return S_OK;
 }
@@ -354,7 +353,7 @@ bool WddmConEngine::IsInitialized()
     return S_OK;
 }
 
-SMALL_RECT WddmConEngine::GetDirtyRectInChars()
+std::vector<til::rectangle> WddmConEngine::GetDirtyArea()
 {
     SMALL_RECT r;
     r.Bottom = _displayHeight > 0 ? (SHORT)(_displayHeight - 1) : 0;
@@ -362,7 +361,7 @@ SMALL_RECT WddmConEngine::GetDirtyRectInChars()
     r.Left = 0;
     r.Right = _displayWidth > 0 ? (SHORT)(_displayWidth - 1) : 0;
 
-    return r;
+    return { r };
 }
 
 RECT WddmConEngine::GetDisplaySize()

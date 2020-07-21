@@ -307,7 +307,7 @@ const bool RenderData::IsGridLineDrawingAllowed() noexcept
         {
             // Otherwise, for compatibility reasons with legacy applications that used the additional CHAR_INFO bits by accident or for their own purposes,
             // we must enable grid line drawing only in a DBCS output codepage. (Line drawing historically only worked in DBCS codepages.)
-            // The only known instance of this is Image for Windows by TeraByte, Inc. (TeryByte Unlimited) which used the bits accidentally and for no purpose
+            // The only known instance of this is Image for Windows by TeraByte, Inc. (TeraByte Unlimited) which used the bits accidentally and for no purpose
             //   (according to the app developer) in conjunction with the Borland Turbo C cgscrn library.
             return !!IsAvailableEastAsianCodePage(gci.OutputCP);
         }
@@ -325,25 +325,14 @@ const std::wstring RenderData::GetConsoleTitle() const noexcept
 }
 
 // Routine Description:
-// - Converts a text attribute into the foreground RGB value that should be presented, applying
+// - Converts a text attribute into the RGB values that should be presented, applying
 //   relevant table translation information and preferences.
 // Return Value:
-// - ARGB color value
-const COLORREF RenderData::GetForegroundColor(const TextAttribute& attr) const noexcept
+// - ARGB color values for the foreground and background
+std::pair<COLORREF, COLORREF> RenderData::GetAttributeColors(const TextAttribute& attr) const noexcept
 {
     const CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
-    return gci.LookupForegroundColor(attr);
-}
-
-// Routine Description:
-// - Converts a text attribute into the background RGB value that should be presented, applying
-//   relevant table translation information and preferences.
-// Return Value:
-// - ARGB color value
-const COLORREF RenderData::GetBackgroundColor(const TextAttribute& attr) const noexcept
-{
-    const CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
-    return gci.LookupBackgroundColor(attr);
+    return gci.LookupAttributeColors(attr);
 }
 #pragma endregion
 
@@ -357,6 +346,11 @@ const COLORREF RenderData::GetBackgroundColor(const TextAttribute& attr) const n
 const bool RenderData::IsSelectionActive() const
 {
     return Selection::Instance().IsAreaSelected();
+}
+
+const bool RenderData::IsBlockSelection() const noexcept
+{
+    return !Selection::Instance().IsLineSelection();
 }
 
 // Routine Description:
@@ -400,13 +394,13 @@ const COORD RenderData::GetSelectionAnchor() const noexcept
 // - none
 // Return Value:
 // - current selection anchor
-const COORD RenderData::GetEndSelectionPosition() const noexcept
+const COORD RenderData::GetSelectionEnd() const noexcept
 {
     // The selection area in ConHost is encoded as two things...
     //  - SelectionAnchor: the initial position where the selection was started
     //  - SelectionRect: the rectangular region denoting a portion of the buffer that is selected
 
-    // The following is an exerpt from Selection::s_GetSelectionRects
+    // The following is an excerpt from Selection::s_GetSelectionRects
     // if the anchor (start of select) was in the top right or bottom left of the box,
     // we need to remove rectangular overlap in the middle.
     // e.g.
@@ -444,5 +438,17 @@ const COORD RenderData::GetEndSelectionPosition() const noexcept
 void RenderData::ColorSelection(const COORD coordSelectionStart, const COORD coordSelectionEnd, const TextAttribute attr)
 {
     Selection::Instance().ColorSelection(coordSelectionStart, coordSelectionEnd, attr);
+}
+
+// Method Description:
+// - Returns true if the screen is globally inverted
+// Arguments:
+// - <none>
+// Return Value:
+// - true if the screen is globally inverted
+bool RenderData::IsScreenReversed() const noexcept
+{
+    const CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
+    return gci.IsScreenReversed();
 }
 #pragma endregion

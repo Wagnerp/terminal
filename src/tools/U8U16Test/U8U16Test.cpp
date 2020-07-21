@@ -26,7 +26,7 @@ u8state::u8state() noexcept :
         _buffer8.clear();
         _buffer8.reserve(capacity);
 
-        // copy UTF-8 code units that were remaining from the previousl call (if any)
+        // copy UTF-8 code units that were remaining from the previous call (if any)
         if (_partialsLen != 0u)
         {
             _buffer8.assign(_utf8Partials.cbegin(), _utf8Partials.cbegin() + _partialsLen);
@@ -115,7 +115,7 @@ u16state::u16state() noexcept :
         _buffer16.clear();
         _buffer16.reserve(capacity);
 
-        // copy UTF-8 code units that were remaining from the previousl call (if any)
+        // copy UTF-8 code units that were remaining from the previous call (if any)
         if (_cached != 0u)
         {
             _buffer16.push_back(_highSurrogate);
@@ -303,7 +303,7 @@ void u16state::reset() noexcept
                 }
 
                 // *** convert the code point to UTF-16 ***
-                if (codePoint != unicodeReplacementChar || discardInvalids == false)
+                if (codePoint != unicodeReplacementChar || !discardInvalids)
                 {
                     if (codePoint < 0x00010000u)
                     {
@@ -471,7 +471,7 @@ void u16state::reset() noexcept
                 }
 
                 // *** convert the code point to UTF-16 ***
-                if (codePoint != unicodeReplacementChar || discardInvalids == false)
+                if (codePoint != unicodeReplacementChar || !discardInvalids)
                 {
                     if (codePoint < 0x00010000u)
                     {
@@ -562,7 +562,7 @@ void u16state::reset() noexcept
                 }
 
                 // *** convert the code point to UTF-8 ***
-                if (codePoint != unicodeReplacementChar || discardInvalids == false)
+                if (codePoint != unicodeReplacementChar || !discardInvalids)
                 {
                     // the outcome of performance tests is that subsequent calls of push_back
                     // perform much better than appending a single initializer_list
@@ -664,7 +664,7 @@ void u16state::reset() noexcept
                 }
 
                 // *** convert the code point to UTF-8 ***
-                if (codePoint != unicodeReplacementChar || discardInvalids == false)
+                if (codePoint != unicodeReplacementChar || !discardInvalids)
                 {
                     // the outcome of further performance tests is that using pointers
                     // perform even better than subsequent calls of push_back

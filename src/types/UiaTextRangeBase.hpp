@@ -22,6 +22,7 @@ Author(s):
 #include "../buffer/out/textBuffer.hpp"
 #include "IUiaData.h"
 #include "unicode.hpp"
+#include "IUiaTraceable.h"
 
 #include <UIAutomationCore.h>
 #include <deque>
@@ -32,18 +33,10 @@ Author(s):
 class UiaTextRangeTests;
 #endif
 
-typedef unsigned long long IdType;
-constexpr IdType InvalidId = 0;
-
 namespace Microsoft::Console::Types
 {
-    class UiaTracing;
-
-    class UiaTextRangeBase : public WRL::RuntimeClass<WRL::RuntimeClassFlags<WRL::ClassicCom | WRL::InhibitFtmBase>, ITextRangeProvider>
+    class UiaTextRangeBase : public WRL::RuntimeClass<WRL::RuntimeClassFlags<WRL::ClassicCom | WRL::InhibitFtmBase>, ITextRangeProvider>, public IUiaTraceable
     {
-    private:
-        static IdType id;
-
     protected:
         // indicates which direction a movement operation
         // is going
@@ -58,31 +51,32 @@ namespace Microsoft::Console::Types
         static constexpr std::wstring_view DefaultWordDelimiter{ &UNICODE_SPACE, 1 };
 
         // degenerate range
-        HRESULT RuntimeClassInitialize(_In_ IUiaData* pData,
-                                       _In_ IRawElementProviderSimple* const pProvider,
-                                       _In_ std::wstring_view wordDelimiters = DefaultWordDelimiter) noexcept;
+        virtual HRESULT RuntimeClassInitialize(_In_ IUiaData* pData,
+                                               _In_ IRawElementProviderSimple* const pProvider,
+                                               _In_ std::wstring_view wordDelimiters = DefaultWordDelimiter) noexcept;
 
         // degenerate range at cursor position
-        HRESULT RuntimeClassInitialize(_In_ IUiaData* pData,
-                                       _In_ IRawElementProviderSimple* const pProvider,
-                                       _In_ const Cursor& cursor,
-                                       _In_ std::wstring_view wordDelimiters = DefaultWordDelimiter) noexcept;
+        virtual HRESULT RuntimeClassInitialize(_In_ IUiaData* pData,
+                                               _In_ IRawElementProviderSimple* const pProvider,
+                                               _In_ const Cursor& cursor,
+                                               _In_ std::wstring_view wordDelimiters = DefaultWordDelimiter) noexcept;
 
         // specific endpoint range
-        HRESULT RuntimeClassInitialize(_In_ IUiaData* pData,
-                                       _In_ IRawElementProviderSimple* const pProvider,
-                                       _In_ const COORD start,
-                                       _In_ const COORD end,
-                                       _In_ std::wstring_view wordDelimiters = DefaultWordDelimiter) noexcept;
+        virtual HRESULT RuntimeClassInitialize(_In_ IUiaData* pData,
+                                               _In_ IRawElementProviderSimple* const pProvider,
+                                               _In_ const COORD start,
+                                               _In_ const COORD end,
+                                               _In_ bool blockRange = false,
+                                               _In_ std::wstring_view wordDelimiters = DefaultWordDelimiter) noexcept;
 
-        HRESULT RuntimeClassInitialize(const UiaTextRangeBase& a) noexcept;
+        virtual HRESULT RuntimeClassInitialize(const UiaTextRangeBase& a) noexcept;
 
-        UiaTextRangeBase(UiaTextRangeBase&&) = default;
-        UiaTextRangeBase& operator=(const UiaTextRangeBase&) = default;
-        UiaTextRangeBase& operator=(UiaTextRangeBase&&) = default;
+        UiaTextRangeBase(const UiaTextRangeBase&) = delete;
+        UiaTextRangeBase(UiaTextRangeBase&&) = delete;
+        UiaTextRangeBase& operator=(const UiaTextRangeBase&) = delete;
+        UiaTextRangeBase& operator=(UiaTextRangeBase&&) = delete;
         ~UiaTextRangeBase() = default;
 
-        const IdType GetId() const noexcept;
         const COORD GetEndpoint(TextPatternRangeEndpoint endpoint) const noexcept;
         bool SetEndpoint(TextPatternRangeEndpoint endpoint, const COORD val) noexcept;
         const bool IsDegenerate() const noexcept;
@@ -127,11 +121,11 @@ namespace Microsoft::Console::Types
 
     protected:
         UiaTextRangeBase() = default;
-        IUiaData* _pData;
+        IUiaData* _pData{ nullptr };
 
-        IRawElementProviderSimple* _pProvider;
+        IRawElementProviderSimple* _pProvider{ nullptr };
 
-        std::wstring _wordDelimiters;
+        std::wstring _wordDelimiters{};
 
         virtual void _ChangeViewport(const SMALL_RECT NewWindow) = 0;
         virtual void _TranslatePointToScreen(LPPOINT clientPoint) const = 0;
@@ -139,51 +133,49 @@ namespace Microsoft::Console::Types
 
         void Initialize(_In_ const UiaPoint point);
 
-        // used to debug objects passed back and forth
-        // between the provider and the client
-        IdType _id;
-
         // measure units in the form [_start, _end).
         // These are in the TextBuffer coordinate space.
         // NOTE: _start is inclusive, but _end is exclusive
-        COORD _start;
-        COORD _end;
+        COORD _start{};
+        COORD _end{};
+        bool _blockRange;
 
         // This is used by tracing to extract the text value
         // that the UiaTextRange currently encompasses.
         // GetText() cannot be used as it's not const
-        std::wstring _getTextValue(int maxLength = -1) const noexcept;
+        std::wstring _getTextValue(std::optional<unsigned int> maxLength = std::nullopt) const noexcept;
 
         RECT _getTerminalRect() const;
 
         virtual const COORD _getScreenFontSize() const;
+
         const unsigned int _getViewportHeight(const SMALL_RECT viewport) const noexcept;
         const Viewport _getBufferSize() const noexcept;
 
-        void _getBoundingRect(_In_ const COORD startAnchor, _In_ const COORD endAnchor, _Inout_ std::vector<double>& coords) const;
+        void _getBoundingRect(const til::rectangle textRect, _Inout_ std::vector<double>& coords) const;
 
         void
         _moveEndpointByUnitCharacter(_In_ const int moveCount,
                                      _In_ const TextPatternRangeEndpoint endpoint,
-                                     _Out_ gsl::not_null<int*> const pAmountMoved,
-                                     _In_ const bool preventBufferEnd = false) noexcept;
+                                     gsl::not_null<int*> const pAmountMoved,
+                                     _In_ const bool preventBufferEnd = false);
 
         void
         _moveEndpointByUnitWord(_In_ const int moveCount,
                                 _In_ const TextPatternRangeEndpoint endpoint,
-                                _Out_ gsl::not_null<int*> const pAmountMoved,
+                                gsl::not_null<int*> const pAmountMoved,
                                 _In_ const bool preventBufferEnd = false);
 
         void
         _moveEndpointByUnitLine(_In_ const int moveCount,
                                 _In_ const TextPatternRangeEndpoint endpoint,
-                                _Out_ gsl::not_null<int*> const pAmountMoved,
+                                gsl::not_null<int*> const pAmountMoved,
                                 _In_ const bool preventBufferEnd = false) noexcept;
 
         void
         _moveEndpointByUnitDocument(_In_ const int moveCount,
                                     _In_ const TextPatternRangeEndpoint endpoint,
-                                    _Out_ gsl::not_null<int*> const pAmountMoved,
+                                    gsl::not_null<int*> const pAmountMoved,
                                     _In_ const bool preventBufferEnd = false) noexcept;
 
 #ifdef UNIT_TESTING

@@ -51,17 +51,18 @@ void IslandWindow::MakeWindow() noexcept
     // Create the window with the default size here - During the creation of the
     // window, the system will give us a chance to set its size in WM_CREATE.
     // WM_CREATE will be handled synchronously, before CreateWindow returns.
-    WINRT_VERIFY(CreateWindow(wc.lpszClassName,
-                              L"Windows Terminal",
-                              WS_OVERLAPPEDWINDOW,
-                              CW_USEDEFAULT,
-                              CW_USEDEFAULT,
-                              CW_USEDEFAULT,
-                              CW_USEDEFAULT,
-                              nullptr,
-                              nullptr,
-                              wc.hInstance,
-                              this));
+    WINRT_VERIFY(CreateWindowEx(_alwaysOnTop ? WS_EX_TOPMOST : 0,
+                                wc.lpszClassName,
+                                L"Windows Terminal",
+                                WS_OVERLAPPEDWINDOW,
+                                CW_USEDEFAULT,
+                                CW_USEDEFAULT,
+                                CW_USEDEFAULT,
+                                CW_USEDEFAULT,
+                                nullptr,
+                                nullptr,
+                                wc.hInstance,
+                                this));
 
     WINRT_ASSERT(_window);
 }
@@ -143,6 +144,7 @@ void IslandWindow::_HandleCreateWindow(const WPARAM, const LPARAM lParam) noexce
     }
 
     ShowWindow(_window.get(), nCmdShow);
+
     UpdateWindow(_window.get());
 }
 
@@ -179,8 +181,14 @@ LRESULT IslandWindow::_OnSizing(const WPARAM wParam, const LPARAM lParam)
     // If this fails, we'll use the default of 96.
     GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &dpix, &dpiy);
 
+    const auto widthScale = base::ClampedNumeric<float>(dpix) / USER_DEFAULT_SCREEN_DPI;
+    const long minWidthScaled = minimumWidth * widthScale;
+
     const auto nonClientSize = GetTotalNonClientExclusiveSize(dpix);
+
     auto clientWidth = winRect->right - winRect->left - nonClientSize.cx;
+    clientWidth = std::max(minWidthScaled, clientWidth);
+
     auto clientHeight = winRect->bottom - winRect->top - nonClientSize.cy;
 
     if (wParam != WMSZ_TOP && wParam != WMSZ_BOTTOM)
@@ -254,7 +262,7 @@ void IslandWindow::Initialize()
 void IslandWindow::OnSize(const UINT width, const UINT height)
 {
     // update the interop window size
-    SetWindowPos(_interopWindowHandle, 0, 0, 0, width, height, SWP_SHOWWINDOW);
+    SetWindowPos(_interopWindowHandle, nullptr, 0, 0, width, height, SWP_SHOWWINDOW);
 
     if (_rootGrid)
     {
@@ -277,16 +285,6 @@ void IslandWindow::OnSize(const UINT width, const UINT height)
     {
         if (_interopWindowHandle != nullptr)
         {
-            // TODO GitHub #2447: Properly attach WindowUiaProvider for signaling model
-            /*
-                // set the text area to have focus for accessibility consumers
-                if (_pUiaProvider)
-                {
-                    LOG_IF_FAILED(_pUiaProvider->SetTextAreaFocus());
-                }
-                break;
-            */
-
             // send focus to the child window
             SetFocus(_interopWindowHandle);
             return 0; // eat the message
@@ -326,35 +324,44 @@ void IslandWindow::OnSize(const UINT width, const UINT height)
         _windowCloseButtonClickedHandler();
         return 0;
     }
+    case WM_MOUSEWHEEL:
+        try
+        {
+            // This whole handler is a hack for GH#979.
+            //
+            // On some laptops, their trackpads won't scroll inactive windows
+            // _ever_. With our entire window just being one giant XAML Island, the
+            // touchpad driver thinks our entire window is inactive, and won't
+            // scroll the XAML island. On those types of laptops, we'll get a
+            // WM_MOUSEWHEEL here, in our root window, when the trackpad scrolls.
+            // We're going to take that message and manually plumb it through to our
+            // TermControl's, or anything else that implements IMouseWheelListener.
+
+            // https://msdn.microsoft.com/en-us/library/windows/desktop/ms645617(v=vs.85).aspx
+            // Important! Do not use the LOWORD or HIWORD macros to extract the x-
+            // and y- coordinates of the cursor position because these macros return
+            // incorrect results on systems with multiple monitors. Systems with
+            // multiple monitors can have negative x- and y- coordinates, and LOWORD
+            // and HIWORD treat the coordinates as unsigned quantities.
+            const til::point eventPoint{ GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) };
+            // This mouse event is relative to the display origin, not the window. Convert here.
+            const til::rectangle windowRect{ GetWindowRect() };
+            const auto origin = windowRect.origin();
+            const auto relative = eventPoint - origin;
+            // Convert to logical scaling before raising the event.
+            const auto real = relative / GetCurrentDpiScale();
+
+            const short wheelDelta = static_cast<short>(HIWORD(wparam));
+
+            // Raise an event, so any listeners can handle the mouse wheel event manually.
+            _MouseScrolledHandlers(real, wheelDelta);
+            return 0;
+        }
+        CATCH_LOG();
     }
 
     // TODO: handle messages here...
     return base_type::MessageHandler(message, wparam, lparam);
-}
-
-// Routine Description:
-// - Creates/retrieves a handle to the UI Automation provider COM interfaces
-// Arguments:
-// - <none>
-// Return Value:
-// - Pointer to UI Automation provider class/interfaces.
-IRawElementProviderSimple* IslandWindow::_GetUiaProvider()
-{
-    if (nullptr == _pUiaProvider)
-    {
-        try
-        {
-            // TODO GitHub #3195: Remove WindowUiaProvider in WindowsTerminal
-            //Microsoft::WRL::MakeAndInitialize<WindowUiaProvider>(&_pUiaProvider, this);
-        }
-        catch (...)
-        {
-            LOG_HR(wil::ResultFromCaughtException());
-            _pUiaProvider = nullptr;
-        }
-    }
-
-    return _pUiaProvider;
 }
 
 // Method Description:
@@ -436,14 +443,63 @@ void IslandWindow::OnApplicationThemeChanged(const winrt::Windows::UI::Xaml::Ele
 }
 
 // Method Description:
-// - Toggles our fullscreen state. See _SetIsFullscreen for more details.
+// - Updates our focus mode state. See _SetIsBorderless for more details.
 // Arguments:
 // - <none>
 // Return Value:
 // - <none>
-void IslandWindow::ToggleFullscreen()
+void IslandWindow::FocusModeChanged(const bool focusMode)
 {
-    _SetIsFullscreen(!_fullscreen);
+    // Do nothing if the value was unchanged.
+    if (focusMode == _borderless)
+    {
+        return;
+    }
+
+    _SetIsBorderless(focusMode);
+}
+
+// Method Description:
+// - Updates our fullscreen state. See _SetIsFullscreen for more details.
+// Arguments:
+// - <none>
+// Return Value:
+// - <none>
+void IslandWindow::FullscreenChanged(const bool fullscreen)
+{
+    // Do nothing if the value was unchanged.
+    if (fullscreen == _fullscreen)
+    {
+        return;
+    }
+
+    _SetIsFullscreen(fullscreen);
+}
+
+// Method Description:
+// - Enter or exit the "always on top" state. Before the window is created, this
+//   value will later be used when we create the window to create the window on
+//   top of all others. After the window is created, it will either enter the
+//   group of topmost windows, or exit the group of topmost windows.
+// Arguments:
+// - alwaysOnTop: whether we should be entering or exiting always on top mode.
+// Return Value:
+// - <none>
+void IslandWindow::SetAlwaysOnTop(const bool alwaysOnTop)
+{
+    _alwaysOnTop = alwaysOnTop;
+
+    const auto hwnd = GetHandle();
+    if (hwnd)
+    {
+        SetWindowPos(hwnd,
+                     _alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+                     0, // the window dimensions are unused, because we're passing SWP_NOSIZE
+                     0,
+                     0,
+                     0,
+                     SWP_NOMOVE | SWP_NOSIZE);
+    }
 }
 
 // From GdiEngine::s_SetWindowLongWHelper
@@ -466,15 +522,105 @@ void _SetWindowLongWHelper(const HWND hWnd, const int nIndex, const LONG dwNewLo
 }
 
 // Method Description:
+// - This is a helper to figure out what the window styles should be, given the
+//   current state of flags like borderless mode and fullscreen mode.
+// Arguments:
+// - <none>
+// Return Value:
+// - a LONG with the appropriate flags set for our current window mode, to be used with GWL_STYLE
+LONG IslandWindow::_getDesiredWindowStyle() const
+{
+    auto windowStyle = GetWindowLongW(GetHandle(), GWL_STYLE);
+
+    // If we're both fullscreen and borderless, fullscreen mode takes precedence.
+
+    if (_fullscreen)
+    {
+        // When moving to fullscreen, remove WS_OVERLAPPEDWINDOW, which specifies
+        // styles for non-fullscreen windows (e.g. caption bar), and add the
+        // WS_POPUP style to allow us to size ourselves to the monitor size.
+        // Do the reverse when restoring from fullscreen.
+        // Doing these modifications to that window will cause a vista-style
+        // window frame to briefly appear when entering and exiting fullscreen.
+        WI_ClearFlag(windowStyle, WS_BORDER);
+        WI_ClearFlag(windowStyle, WS_SIZEBOX);
+        WI_ClearAllFlags(windowStyle, WS_OVERLAPPEDWINDOW);
+
+        WI_SetFlag(windowStyle, WS_POPUP);
+        return windowStyle;
+    }
+    else if (_borderless)
+    {
+        // When moving to borderless, remove WS_OVERLAPPEDWINDOW, which
+        // specifies styles for non-fullscreen windows (e.g. caption bar), and
+        // add the WS_BORDER and WS_SIZEBOX styles. This allows us to still have
+        // a small resizing frame, but without a full titlebar, nor caption
+        // buttons.
+
+        WI_ClearAllFlags(windowStyle, WS_OVERLAPPEDWINDOW);
+        WI_ClearFlag(windowStyle, WS_POPUP);
+
+        WI_SetFlag(windowStyle, WS_BORDER);
+        WI_SetFlag(windowStyle, WS_SIZEBOX);
+        return windowStyle;
+    }
+
+    // Here, we're not in either fullscreen or borderless mode. Return to
+    // WS_OVERLAPPEDWINDOW.
+    WI_ClearFlag(windowStyle, WS_POPUP);
+    WI_ClearFlag(windowStyle, WS_BORDER);
+    WI_ClearFlag(windowStyle, WS_SIZEBOX);
+
+    WI_SetAllFlags(windowStyle, WS_OVERLAPPEDWINDOW);
+
+    return windowStyle;
+}
+
+// Method Description:
+// - Enable or disable focus mode. When entering focus mode, we'll
+//   need to manually hide the entire titlebar.
+// - When we're entering focus we need to do some additional modification
+//   of our window styles. However, the NonClientIslandWindow very explicitly
+//   _doesn't_ need to do these steps.
+// Arguments:
+// - borderlessEnabled: If true, we're entering focus mode. If false, we're leaving.
+// Return Value:
+// - <none>
+void IslandWindow::_SetIsBorderless(const bool borderlessEnabled)
+{
+    _borderless = borderlessEnabled;
+
+    HWND const hWnd = GetHandle();
+
+    // First, modify regular window styles as appropriate
+    auto windowStyle = _getDesiredWindowStyle();
+    _SetWindowLongWHelper(hWnd, GWL_STYLE, windowStyle);
+
+    // Now modify extended window styles as appropriate
+    // When moving to fullscreen, remove the window edge style to avoid an
+    // ugly border when not focused.
+    auto exWindowStyle = GetWindowLongW(hWnd, GWL_EXSTYLE);
+    WI_UpdateFlag(exWindowStyle, WS_EX_WINDOWEDGE, !_fullscreen);
+    _SetWindowLongWHelper(hWnd, GWL_EXSTYLE, exWindowStyle);
+
+    // Resize the window, with SWP_FRAMECHANGED, to trigger user32 to
+    // recalculate the non/client areas
+    const til::rectangle windowPos{ GetWindowRect() };
+    SetWindowPos(GetHandle(),
+                 HWND_TOP,
+                 windowPos.left<int>(),
+                 windowPos.top<int>(),
+                 windowPos.width<int>(),
+                 windowPos.height<int>(),
+                 SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+}
+
+// Method Description:
 // - Controls setting us into or out of fullscreen mode. Largely taken from
 //   Window::SetIsFullscreen in conhost.
 // - When entering fullscreen mode, we'll save the current window size and
 //   location, and expand to take the entire monitor size. When leaving, we'll
 //   use that saved size to restore back to.
-// - When we're entering fullscreen we need to do some additional modification
-//   of our window styles. However, the NonClientIslandWindow very explicitly
-//   _doesn't_ need to do these steps. Subclasses should override
-//   _ShouldUpdateStylesOnFullscreen to disable setting these window styles.
 // Arguments:
 // - fullscreenEnabled true if we should enable fullscreen mode, false to disable.
 // Return Value:
@@ -487,28 +633,10 @@ void IslandWindow::_SetIsFullscreen(const bool fullscreenEnabled)
     const auto oldIsInFullscreen = _fullscreen;
     _fullscreen = fullscreenEnabled;
 
-    HWND const hWnd = GetWindowHandle();
+    HWND const hWnd = GetHandle();
 
     // First, modify regular window styles as appropriate
-    auto windowStyle = GetWindowLongW(hWnd, GWL_STYLE);
-
-    // When moving to fullscreen, remove WS_OVERLAPPEDWINDOW, which specifies
-    // styles for non-fullscreen windows (e.g. caption bar), and add the
-    // WS_POPUP style to allow us to size ourselves to the monitor size.
-    // Do the reverse when restoring from fullscreen.
-    // Doing these modifications to that window will cause a vista-style
-    // window frame to briefly appear when entering and exiting fullscreen.
-    if (_fullscreen)
-    {
-        WI_ClearAllFlags(windowStyle, WS_OVERLAPPEDWINDOW);
-        WI_SetFlag(windowStyle, WS_POPUP);
-    }
-    else
-    {
-        WI_ClearFlag(windowStyle, WS_POPUP);
-        WI_SetAllFlags(windowStyle, WS_OVERLAPPEDWINDOW);
-    }
-
+    auto windowStyle = _getDesiredWindowStyle();
     _SetWindowLongWHelper(hWnd, GWL_STYLE, windowStyle);
 
     // Now modify extended window styles as appropriate
@@ -518,6 +646,8 @@ void IslandWindow::_SetIsFullscreen(const bool fullscreenEnabled)
     WI_UpdateFlag(exWindowStyle, WS_EX_WINDOWEDGE, !_fullscreen);
     _SetWindowLongWHelper(hWnd, GWL_EXSTYLE, exWindowStyle);
 
+    // When entering/exiting fullscreen mode, we also need to backup/restore the
+    // current window size, and resize the window to match the new state.
     _BackupWindowSizes(oldIsInFullscreen);
     _ApplyWindowSize();
 }
@@ -542,7 +672,7 @@ void IslandWindow::_BackupWindowSizes(const bool fCurrentIsInFullscreen)
         }
 
         // get and back up the current monitor's size
-        HMONITOR const hCurrentMonitor = MonitorFromWindow(GetWindowHandle(), MONITOR_DEFAULTTONEAREST);
+        HMONITOR const hCurrentMonitor = MonitorFromWindow(GetHandle(), MONITOR_DEFAULTTONEAREST);
         MONITORINFO currMonitorInfo;
         currMonitorInfo.cbSize = sizeof(currMonitorInfo);
         if (GetMonitorInfo(hCurrentMonitor, &currMonitorInfo))
@@ -562,7 +692,7 @@ void IslandWindow::_BackupWindowSizes(const bool fCurrentIsInFullscreen)
 void IslandWindow::_ApplyWindowSize()
 {
     const auto newSize = _fullscreen ? _fullscreenWindowSize : _nonFullscreenWindowSize;
-    LOG_IF_WIN32_BOOL_FALSE(SetWindowPos(GetWindowHandle(),
+    LOG_IF_WIN32_BOOL_FALSE(SetWindowPos(GetHandle(),
                                          HWND_TOP,
                                          newSize.left,
                                          newSize.top,

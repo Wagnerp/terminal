@@ -72,7 +72,7 @@ namespace TerminalCoreUnitTests
             term.SetSelectionAnchor({ 5, rowValue });
 
             // Simulate move to (x,y) = (15,20)
-            term.SetEndSelectionPosition({ 15, 20 });
+            term.SetSelectionEnd({ 15, 20 });
 
             // Simulate renderer calling TriggerSelection and acquiring selection area
             auto selectionRects = term.GetSelectionRects();
@@ -110,19 +110,19 @@ namespace TerminalCoreUnitTests
         {
             const COORD maxCoord = { SHRT_MAX, SHRT_MAX };
 
-            // Test SetSelectionAnchor(COORD) and SetEndSelectionPosition(COORD)
+            // Test SetSelectionAnchor(COORD) and SetSelectionEnd(COORD)
             // Behavior: clamp coord to viewport.
             auto ValidateSingleClickSelection = [&](SHORT scrollback, SMALL_RECT expected) {
                 Terminal term;
                 DummyRenderTarget emptyRT;
                 term.Create({ 10, 10 }, scrollback, emptyRT);
 
-                // NOTE: SetEndSelectionPosition(COORD) is called within SetSelectionAnchor(COORD)
+                // NOTE: SetSelectionEnd(COORD) is called within SetSelectionAnchor(COORD)
                 term.SetSelectionAnchor(maxCoord);
                 ValidateSingleRowSelection(term, expected);
             };
 
-            // Test DoubleClickSelection(COORD)
+            // Test a Double Click Selection
             // Behavior: clamp coord to viewport.
             //           Then, do double click selection.
             auto ValidateDoubleClickSelection = [&](SHORT scrollback, SMALL_RECT expected) {
@@ -130,11 +130,11 @@ namespace TerminalCoreUnitTests
                 DummyRenderTarget emptyRT;
                 term.Create({ 10, 10 }, scrollback, emptyRT);
 
-                term.DoubleClickSelection(maxCoord);
+                term.MultiClickSelection(maxCoord, Terminal::SelectionExpansionMode::Word);
                 ValidateSingleRowSelection(term, expected);
             };
 
-            // Test TripleClickSelection(COORD)
+            // Test a Triple Click Selection
             // Behavior: clamp coord to viewport.
             //           Then, do triple click selection.
             auto ValidateTripleClickSelection = [&](SHORT scrollback, SMALL_RECT expected) {
@@ -142,7 +142,7 @@ namespace TerminalCoreUnitTests
                 DummyRenderTarget emptyRT;
                 term.Create({ 10, 10 }, scrollback, emptyRT);
 
-                term.TripleClickSelection(maxCoord);
+                term.MultiClickSelection(maxCoord, Terminal::SelectionExpansionMode::Line);
                 ValidateSingleRowSelection(term, expected);
             };
 
@@ -226,17 +226,17 @@ namespace TerminalCoreUnitTests
 
             // Case 1: Move out of right boundary
             Log::Comment(L"Out of bounds: X-value too large");
-            term.SetEndSelectionPosition({ 20, 5 });
+            term.SetSelectionEnd({ 20, 5 });
             ValidateSingleRowSelection(term, SMALL_RECT({ 5, 5, rightBoundary, 5 }));
 
             // Case 2: Move out of left boundary
             Log::Comment(L"Out of bounds: X-value negative");
-            term.SetEndSelectionPosition({ -20, 5 });
+            term.SetSelectionEnd({ -20, 5 });
             ValidateSingleRowSelection(term, { leftBoundary, 5, 5, 5 });
 
             // Case 3: Move out of top boundary
             Log::Comment(L"Out of bounds: Y-value negative");
-            term.SetEndSelectionPosition({ 5, -20 });
+            term.SetSelectionEnd({ 5, -20 });
             {
                 auto selectionRects = term.GetSelectionRects();
 
@@ -267,7 +267,7 @@ namespace TerminalCoreUnitTests
 
             // Case 4: Move out of bottom boundary
             Log::Comment(L"Out of bounds: Y-value too large");
-            term.SetEndSelectionPosition({ 5, 20 });
+            term.SetSelectionEnd({ 5, 20 });
             {
                 auto selectionRects = term.GetSelectionRects();
 
@@ -310,10 +310,10 @@ namespace TerminalCoreUnitTests
 
             // Simulate ALT + click at (x,y) = (5,10)
             term.SetSelectionAnchor({ 5, rowValue });
-            term.SetBoxSelection(true);
+            term.SetBlockSelection(true);
 
             // Simulate move to (x,y) = (15,20)
-            term.SetEndSelectionPosition({ 15, 20 });
+            term.SetSelectionEnd({ 15, 20 });
 
             // Simulate renderer calling TriggerSelection and acquiring selection area
             auto selectionRects = term.GetSelectionRects();
@@ -349,7 +349,7 @@ namespace TerminalCoreUnitTests
             term.SetSelectionAnchor({ 5, rowValue });
 
             // Simulate move to (x,y) = (15,20)
-            term.SetEndSelectionPosition({ 15, 20 });
+            term.SetSelectionEnd({ 15, 20 });
 
             // Simulate renderer calling TriggerSelection and acquiring selection area
             auto selectionRects = term.GetSelectionRects();
@@ -449,10 +449,10 @@ namespace TerminalCoreUnitTests
 
             // Simulate ALT + click at (x,y) = (5,8)
             term.SetSelectionAnchor({ 5, 8 });
-            term.SetBoxSelection(true);
+            term.SetBlockSelection(true);
 
             // Simulate move to (x,y) = (7,12)
-            term.SetEndSelectionPosition({ 7, 12 });
+            term.SetSelectionEnd({ 7, 12 });
 
             // Simulate renderer calling TriggerSelection and acquiring selection area
             auto selectionRects = term.GetSelectionRects();
@@ -501,7 +501,7 @@ namespace TerminalCoreUnitTests
 
             // Simulate double click at (x,y) = (5,10)
             auto clickPos = COORD{ 5, 10 };
-            term.DoubleClickSelection(clickPos);
+            term.MultiClickSelection(clickPos, Terminal::SelectionExpansionMode::Word);
 
             // Validate selection area
             ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, (4 + gsl::narrow<SHORT>(text.size()) - 1), 10 }));
@@ -519,7 +519,7 @@ namespace TerminalCoreUnitTests
 
             // Simulate click at (x,y) = (5,10)
             auto clickPos = COORD{ 5, 10 };
-            term.DoubleClickSelection(clickPos);
+            term.MultiClickSelection(clickPos, Terminal::SelectionExpansionMode::Word);
 
             // Simulate renderer calling TriggerSelection and acquiring selection area
             auto selectionRects = term.GetSelectionRects();
@@ -546,7 +546,7 @@ namespace TerminalCoreUnitTests
             // Simulate click at (x,y) = (15,10)
             // this is over the '>' char
             auto clickPos = COORD{ 15, 10 };
-            term.DoubleClickSelection(clickPos);
+            term.MultiClickSelection(clickPos, Terminal::SelectionExpansionMode::Word);
 
             // ---Validate selection area---
             // "Terminal" is in class 2
@@ -572,14 +572,14 @@ namespace TerminalCoreUnitTests
             term.Write(text);
 
             // Simulate double click at (x,y) = (5,10)
-            term.DoubleClickSelection({ 5, 10 });
+            term.MultiClickSelection({ 5, 10 }, Terminal::SelectionExpansionMode::Word);
 
             // Simulate move to (x,y) = (21,10)
             //
             // buffer: doubleClickMe dragThroughHere
             //         ^                ^
             //       start            finish
-            term.SetEndSelectionPosition({ 21, 10 });
+            term.SetSelectionEnd({ 21, 10 });
 
             // Validate selection area
             ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, 32, 10 }));
@@ -601,14 +601,14 @@ namespace TerminalCoreUnitTests
             term.Write(text);
 
             // Simulate double click at (x,y) = (21,10)
-            term.DoubleClickSelection({ 21, 10 });
+            term.MultiClickSelection({ 21, 10 }, Terminal::SelectionExpansionMode::Word);
 
             // Simulate move to (x,y) = (5,10)
             //
             // buffer: doubleClickMe dragThroughHere
             //         ^                ^
             //       finish            start
-            term.SetEndSelectionPosition({ 5, 10 });
+            term.SetSelectionEnd({ 5, 10 });
 
             // Validate selection area
             ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, 32, 10 }));
@@ -622,7 +622,7 @@ namespace TerminalCoreUnitTests
 
             // Simulate click at (x,y) = (5,10)
             auto clickPos = COORD{ 5, 10 };
-            term.TripleClickSelection(clickPos);
+            term.MultiClickSelection(clickPos, Terminal::SelectionExpansionMode::Line);
 
             // Validate selection area
             ValidateSingleRowSelection(term, SMALL_RECT({ 0, 10, 99, 10 }));
@@ -636,10 +636,10 @@ namespace TerminalCoreUnitTests
 
             // Simulate click at (x,y) = (5,10)
             auto clickPos = COORD{ 5, 10 };
-            term.TripleClickSelection(clickPos);
+            term.MultiClickSelection(clickPos, Terminal::SelectionExpansionMode::Line);
 
             // Simulate move to (x,y) = (7,10)
-            term.SetEndSelectionPosition({ 7, 10 });
+            term.SetSelectionEnd({ 7, 10 });
 
             // Validate selection area
             ValidateSingleRowSelection(term, SMALL_RECT({ 0, 10, 99, 10 }));
@@ -653,10 +653,10 @@ namespace TerminalCoreUnitTests
 
             // Simulate click at (x,y) = (5,10)
             auto clickPos = COORD{ 5, 10 };
-            term.TripleClickSelection(clickPos);
+            term.MultiClickSelection(clickPos, Terminal::SelectionExpansionMode::Line);
 
             // Simulate move to (x,y) = (5,11)
-            term.SetEndSelectionPosition({ 5, 11 });
+            term.SetSelectionEnd({ 5, 11 });
 
             // Simulate renderer calling TriggerSelection and acquiring selection area
             auto selectionRects = term.GetSelectionRects();
@@ -673,48 +673,173 @@ namespace TerminalCoreUnitTests
             VERIFY_ARE_EQUAL(selection, SMALL_RECT({ 0, 11, 99, 11 }));
         }
 
-        TEST_METHOD(CopyOnSelect)
+        TEST_METHOD(ShiftClick)
         {
             Terminal term;
             DummyRenderTarget emptyRT;
             term.Create({ 100, 100 }, 0, emptyRT);
 
-            // set copyOnSelect for terminal
+            // set word delimiters for terminal
             auto settings = winrt::make<MockTermSettings>(0, 100, 100);
-            settings.CopyOnSelect(true);
             term.UpdateSettings(settings);
 
-            // Simulate click at (x,y) = (5,10)
-            term.SetSelectionAnchor({ 5, 10 });
+            // Insert text at position (4,10)
+            const std::wstring_view text = L"doubleClickMe dragThroughHere";
+            term.SetCursorPosition(4, 10);
+            term.Write(text);
 
-            // Simulate move to (x,y) = (5,10)
-            // (So, no movement)
-            term.SetEndSelectionPosition({ 5, 10 });
-
-            // Case 1: single cell selection not allowed
+            // Step 1: Create a selection on "doubleClickMe"
             {
-                // Simulate renderer calling TriggerSelection and acquiring selection area
-                auto selectionRects = term.GetSelectionRects();
+                // Simulate double click at (x,y) = (5,10)
+                term.MultiClickSelection({ 5, 10 }, Terminal::SelectionExpansionMode::Word);
 
-                // Validate selection area
-                VERIFY_ARE_EQUAL(selectionRects.size(), static_cast<size_t>(0));
-
-                // single cell selection should not be allowed
-                // thus, selection is NOT active
-                VERIFY_IS_FALSE(term.IsSelectionActive());
+                // Validate selection area: "doubleClickMe" selected
+                ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, 16, 10 }));
             }
 
-            // Case 2: move off of single cell
-            term.SetEndSelectionPosition({ 6, 10 });
-            ValidateSingleRowSelection(term, { 5, 10, 6, 10 });
-            VERIFY_IS_TRUE(term.IsSelectionActive());
+            // Step 2: Shift+Click to "dragThroughHere"
+            {
+                // Simulate Shift+Click at (x,y) = (21,10)
+                //
+                // buffer: doubleClickMe dragThroughHere
+                //         ^                ^
+                //       start            finish
+                term.SetSelectionEnd({ 21, 10 }, ::Terminal::SelectionExpansionMode::Cell);
 
-            // Case 3: move back onto single cell (now allowed)
-            term.SetEndSelectionPosition({ 5, 10 });
-            ValidateSingleRowSelection(term, { 5, 10, 5, 10 });
+                // Validate selection area: "doubleClickMe drag" selected
+                ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, 21, 10 }));
+            }
 
-            // single cell selection should now be allowed
-            VERIFY_IS_TRUE(term.IsSelectionActive());
+            // Step 3: Shift+Double-Click at "dragThroughHere"
+            {
+                // Simulate Shift+DoubleClick at (x,y) = (21,10)
+                //
+                // buffer: doubleClickMe dragThroughHere
+                //         ^                ^          ^
+                //       start            click      finish
+                term.SetSelectionEnd({ 21, 10 }, ::Terminal::SelectionExpansionMode::Word);
+
+                // Validate selection area: "doubleClickMe dragThroughHere" selected
+                ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, 32, 10 }));
+            }
+
+            // Step 4: Shift+Triple-Click at "dragThroughHere"
+            {
+                // Simulate Shift+TripleClick at (x,y) = (21,10)
+                //
+                // buffer: doubleClickMe dragThroughHere     |
+                //         ^                ^                ^
+                //       start            click            finish (boundary)
+                term.SetSelectionEnd({ 21, 10 }, ::Terminal::SelectionExpansionMode::Line);
+
+                // Validate selection area: "doubleClickMe dragThroughHere..." selected
+                ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, 99, 10 }));
+            }
+
+            // Step 5: Shift+Double-Click at "dragThroughHere"
+            {
+                // Simulate Shift+DoubleClick at (x,y) = (21,10)
+                //
+                // buffer: doubleClickMe dragThroughHere
+                //         ^                ^          ^
+                //       start            click      finish
+                term.SetSelectionEnd({ 21, 10 }, ::Terminal::SelectionExpansionMode::Word);
+
+                // Validate selection area: "doubleClickMe dragThroughHere" selected
+                ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, 32, 10 }));
+            }
+
+            // Step 6: Drag past "dragThroughHere"
+            {
+                // Simulate drag to (x,y) = (35,10)
+                // Since we were preceded by a double-click, we're in "word" expansion mode
+                //
+                // buffer: doubleClickMe dragThroughHere     |
+                //         ^                                 ^
+                //       start                             finish (boundary)
+                term.SetSelectionEnd({ 35, 10 });
+
+                // Validate selection area: "doubleClickMe dragThroughHere..." selected
+                ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, 99, 10 }));
+            }
+
+            // Step 6: Drag back to "dragThroughHere"
+            {
+                // Simulate drag to (x,y) = (21,10)
+                //
+                // buffer: doubleClickMe dragThroughHere
+                //         ^                ^          ^
+                //       start             drag      finish
+                term.SetSelectionEnd({ 21, 10 });
+
+                // Validate selection area: "doubleClickMe dragThroughHere" selected
+                ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, 32, 10 }));
+            }
+
+            // Step 7: Drag within "dragThroughHere"
+            {
+                // Simulate drag to (x,y) = (25,10)
+                //
+                // buffer: doubleClickMe dragThroughHere
+                //         ^                    ^      ^
+                //       start                 drag  finish
+                term.SetSelectionEnd({ 25, 10 });
+
+                // Validate selection area: "doubleClickMe dragThroughHere" still selected
+                ValidateSingleRowSelection(term, SMALL_RECT({ 4, 10, 32, 10 }));
+            }
+        }
+
+        TEST_METHOD(Pivot)
+        {
+            Terminal term;
+            DummyRenderTarget emptyRT;
+            term.Create({ 100, 100 }, 0, emptyRT);
+
+            // Step 1: Create a selection
+            {
+                // (10,10) to (20, 10)
+                term.SelectNewRegion({ 10, 10 }, { 20, 10 });
+
+                // Validate selection area
+                ValidateSingleRowSelection(term, SMALL_RECT({ 10, 10, 20, 10 }));
+            }
+
+            // Step 2: Drag to (5,10)
+            {
+                term.SetSelectionEnd({ 5, 10 });
+
+                // Validate selection area
+                // NOTE: Pivot should be (10, 10)
+                ValidateSingleRowSelection(term, SMALL_RECT({ 5, 10, 10, 10 }));
+            }
+
+            // Step 3: Drag back to (20,10)
+            {
+                term.SetSelectionEnd({ 20, 10 });
+
+                // Validate selection area
+                // NOTE: Pivot should still be (10, 10)
+                ValidateSingleRowSelection(term, SMALL_RECT({ 10, 10, 20, 10 }));
+            }
+
+            // Step 4: Shift+Click at (5,10)
+            {
+                term.SetSelectionEnd({ 5, 10 }, ::Terminal::SelectionExpansionMode::Cell);
+
+                // Validate selection area
+                // NOTE: Pivot should still be (10, 10)
+                ValidateSingleRowSelection(term, SMALL_RECT({ 5, 10, 10, 10 }));
+            }
+
+            // Step 5: Shift+Click back at (20,10)
+            {
+                term.SetSelectionEnd({ 20, 10 }, ::Terminal::SelectionExpansionMode::Cell);
+
+                // Validate selection area
+                // NOTE: Pivot should still be (10, 10)
+                ValidateSingleRowSelection(term, SMALL_RECT({ 10, 10, 20, 10 }));
+            }
         }
     };
 }

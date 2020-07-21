@@ -50,21 +50,20 @@ const TextAttribute Terminal::GetDefaultBrushColors() noexcept
     return TextAttribute{};
 }
 
-const COLORREF Terminal::GetForegroundColor(const TextAttribute& attr) const noexcept
+std::pair<COLORREF, COLORREF> Terminal::GetAttributeColors(const TextAttribute& attr) const noexcept
 {
-    return 0xff000000 | attr.CalculateRgbForeground({ _colorTable.data(), _colorTable.size() }, _defaultFg, _defaultBg);
-}
-
-const COLORREF Terminal::GetBackgroundColor(const TextAttribute& attr) const noexcept
-{
-    const auto bgColor = attr.CalculateRgbBackground({ _colorTable.data(), _colorTable.size() }, _defaultFg, _defaultBg);
+    auto colors = attr.CalculateRgbColors({ _colorTable.data(), _colorTable.size() },
+                                          _defaultFg,
+                                          _defaultBg,
+                                          _screenReversed);
+    colors.first |= 0xff000000;
     // We only care about alpha for the default BG (which enables acrylic)
-    // If the bg isn't the default bg color, then make it fully opaque.
-    if (!attr.BackgroundIsDefault())
+    // If the bg isn't the default bg color, or reverse video is enabled, make it fully opaque.
+    if (!attr.BackgroundIsDefault() || (attr.IsReverseVideo() ^ _screenReversed))
     {
-        return 0xff000000 | bgColor;
+        colors.second |= 0xff000000;
     }
-    return bgColor;
+    return colors;
 }
 
 COORD Terminal::GetCursorPosition() const noexcept
@@ -105,9 +104,11 @@ COLORREF Terminal::GetCursorColor() const noexcept
     return _buffer->GetCursor().GetColor();
 }
 
-bool Terminal::IsCursorDoubleWidth() const noexcept
+bool Terminal::IsCursorDoubleWidth() const
 {
-    return false;
+    const auto position = _buffer->GetCursor().GetPosition();
+    TextBufferTextIterator it(TextBufferCellIterator(*_buffer, position));
+    return IsGlyphFullWidth(*it);
 }
 
 const std::vector<RenderOverlay> Terminal::GetOverlays() const noexcept
@@ -165,7 +166,7 @@ void Terminal::SelectNewRegion(const COORD coordStart, const COORD coordEnd)
 
     if (notifyScrollChange)
     {
-        _buffer->GetRenderTarget().TriggerRedrawAll();
+        _buffer->GetRenderTarget().TriggerScroll();
         _NotifyScrollEvent();
     }
 
@@ -173,13 +174,17 @@ void Terminal::SelectNewRegion(const COORD coordStart, const COORD coordEnd)
     realCoordEnd.Y -= gsl::narrow<short>(_VisibleStartIndex());
 
     SetSelectionAnchor(realCoordStart);
-    SetEndSelectionPosition(realCoordEnd);
+    SetSelectionEnd(realCoordEnd, SelectionExpansionMode::Cell);
 }
 
 const std::wstring Terminal::GetConsoleTitle() const noexcept
 try
 {
-    return _title;
+    if (_title.has_value())
+    {
+        return _title.value();
+    }
+    return _startingTitle;
 }
 catch (...)
 {
@@ -203,4 +208,13 @@ void Terminal::LockConsole() noexcept
 void Terminal::UnlockConsole() noexcept
 {
     _readWriteLock.unlock_shared();
+}
+
+// Method Description:
+// - Returns whether the screen is inverted;
+// Return Value:
+// - false.
+bool Terminal::IsScreenReversed() const noexcept
+{
+    return _screenReversed;
 }

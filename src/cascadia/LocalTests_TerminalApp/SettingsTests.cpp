@@ -56,8 +56,6 @@ namespace TerminalAppLocalTests
         TEST_METHOD(TestInvalidColorSchemeName);
         TEST_METHOD(TestHelperFunctions);
 
-        TEST_METHOD(TestLayerGlobalsOnRoot);
-
         TEST_METHOD(TestProfileIconWithEnvVar);
         TEST_METHOD(TestProfileBackgroundImageWithEnvVar);
 
@@ -69,6 +67,22 @@ namespace TerminalAppLocalTests
         TEST_METHOD(TestLayerUserDefaultsOnDynamics);
 
         TEST_METHOD(TestTerminalArgsForBinding);
+
+        TEST_METHOD(FindMissingProfile);
+        TEST_METHOD(MakeSettingsForProfileThatDoesntExist);
+        TEST_METHOD(MakeSettingsForDefaultProfileThatDoesntExist);
+
+        TEST_METHOD(TestLayerProfileOnColorScheme);
+
+        TEST_METHOD(ValidateKeybindingsWarnings);
+
+        TEST_METHOD(ValidateExecuteCommandlineWarning);
+
+        TEST_METHOD(ValidateLegacyGlobalsWarning);
+
+        TEST_METHOD(TestTrailingCommas);
+
+        TEST_METHOD(TestCommandsAndKeybindings);
 
         TEST_CLASS_SETUP(ClassSetup)
         {
@@ -152,9 +166,7 @@ namespace TerminalAppLocalTests
     {
         const std::string goodProfiles{ R"(
         {
-            "globals": {
-                "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}"
-            },
+            "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}",
             "profiles": [
                 {
                     "name" : "profile0",
@@ -169,9 +181,7 @@ namespace TerminalAppLocalTests
 
         const std::string badProfiles{ R"(
         {
-            "globals": {
-                "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}"
-            },
+            "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}",
             "profiles": [
                 {
                     "name" : "profile0",
@@ -186,9 +196,7 @@ namespace TerminalAppLocalTests
 
         const std::string noDefaultAtAll{ R"(
         {
-            "globals": {
-                "alwaysShowTabs": true
-            },
+            "alwaysShowTabs": true,
             "profiles": [
                 {
                     "name" : "profile0",
@@ -201,16 +209,32 @@ namespace TerminalAppLocalTests
             ]
         })" };
 
+        const std::string goodProfilesSpecifiedByName{ R"(
+        {
+            "defaultProfile": "profile1",
+            "profiles": [
+                {
+                    "name" : "profile0",
+                    "guid": "{6239a42c-1111-49a3-80bd-e8fdd045185c}"
+                },
+                {
+                    "name" : "profile1",
+                    "guid": "{6239a42c-2222-49a3-80bd-e8fdd045185c}"
+                }
+            ]
+        })" };
+
         {
             // Case 1: Good settings
             Log::Comment(NoThrowString().Format(
                 L"Testing a pair of profiles with unique guids, and the defaultProfile is one of those guids"));
             const auto settingsObject = VerifyParseSucceeded(goodProfiles);
             auto settings = CascadiaSettings::FromJson(settingsObject);
+            settings->_ResolveDefaultProfile();
             settings->_ValidateDefaultProfileExists();
             VERIFY_ARE_EQUAL(static_cast<size_t>(0), settings->_warnings.size());
             VERIFY_ARE_EQUAL(static_cast<size_t>(2), settings->_profiles.size());
-            VERIFY_ARE_EQUAL(settings->_globals.GetDefaultProfile(), settings->_profiles.at(0).GetGuid());
+            VERIFY_ARE_EQUAL(settings->_globals.DefaultProfile(), settings->_profiles.at(0).GetGuid());
         }
         {
             // Case 2: Bad settings
@@ -218,12 +242,13 @@ namespace TerminalAppLocalTests
                 L"Testing a pair of profiles with unique guids, but the defaultProfile is NOT one of those guids"));
             const auto settingsObject = VerifyParseSucceeded(badProfiles);
             auto settings = CascadiaSettings::FromJson(settingsObject);
+            settings->_ResolveDefaultProfile();
             settings->_ValidateDefaultProfileExists();
             VERIFY_ARE_EQUAL(static_cast<size_t>(1), settings->_warnings.size());
             VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingDefaultProfile, settings->_warnings.at(0));
 
             VERIFY_ARE_EQUAL(static_cast<size_t>(2), settings->_profiles.size());
-            VERIFY_ARE_EQUAL(settings->_globals.GetDefaultProfile(), settings->_profiles.at(0).GetGuid());
+            VERIFY_ARE_EQUAL(settings->_globals.DefaultProfile(), settings->_profiles.at(0).GetGuid());
         }
         {
             // Case 2: Bad settings
@@ -231,12 +256,25 @@ namespace TerminalAppLocalTests
                 L"Testing a pair of profiles with unique guids, and no defaultProfile at all"));
             const auto settingsObject = VerifyParseSucceeded(badProfiles);
             auto settings = CascadiaSettings::FromJson(settingsObject);
+            settings->_ResolveDefaultProfile();
             settings->_ValidateDefaultProfileExists();
             VERIFY_ARE_EQUAL(static_cast<size_t>(1), settings->_warnings.size());
             VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingDefaultProfile, settings->_warnings.at(0));
 
             VERIFY_ARE_EQUAL(static_cast<size_t>(2), settings->_profiles.size());
-            VERIFY_ARE_EQUAL(settings->_globals.GetDefaultProfile(), settings->_profiles.at(0).GetGuid());
+            VERIFY_ARE_EQUAL(settings->_globals.DefaultProfile(), settings->_profiles.at(0).GetGuid());
+        }
+        {
+            // Case 4: Good settings, default profile is a string
+            Log::Comment(NoThrowString().Format(
+                L"Testing a pair of profiles with unique guids, and the defaultProfile is one of the profile names"));
+            const auto settingsObject = VerifyParseSucceeded(goodProfilesSpecifiedByName);
+            auto settings = CascadiaSettings::FromJson(settingsObject);
+            settings->_ResolveDefaultProfile();
+            settings->_ValidateDefaultProfileExists();
+            VERIFY_ARE_EQUAL(static_cast<size_t>(0), settings->_warnings.size());
+            VERIFY_ARE_EQUAL(static_cast<size_t>(2), settings->_profiles.size());
+            VERIFY_ARE_EQUAL(settings->_globals.DefaultProfile(), settings->_profiles.at(1).GetGuid());
         }
     }
 
@@ -380,9 +418,7 @@ namespace TerminalAppLocalTests
     {
         const std::string badProfiles{ R"(
         {
-            "globals": {
-                "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}"
-            },
+            "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}",
             "profiles": [
                 {
                     "name" : "profile0",
@@ -420,7 +456,7 @@ namespace TerminalAppLocalTests
         VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::UnknownColorScheme, settings->_warnings.at(2));
 
         VERIFY_ARE_EQUAL(3u, settings->_profiles.size());
-        VERIFY_ARE_EQUAL(settings->_globals.GetDefaultProfile(), settings->_profiles.at(0).GetGuid());
+        VERIFY_ARE_EQUAL(settings->_globals.DefaultProfile(), settings->_profiles.at(0).GetGuid());
         VERIFY_IS_TRUE(settings->_profiles.at(0)._guid.has_value());
         VERIFY_IS_TRUE(settings->_profiles.at(1)._guid.has_value());
         VERIFY_IS_TRUE(settings->_profiles.at(2)._guid.has_value());
@@ -430,21 +466,15 @@ namespace TerminalAppLocalTests
     {
         const std::string settings0String{ R"(
         {
-            "globals": {
-                "alwaysShowTabs": true,
-                "initialCols" : 120,
-                "initialRows" : 30,
-                "rowsToScroll" :  4
-            }
+            "alwaysShowTabs": true,
+            "initialCols" : 120,
+            "initialRows" : 30
         })" };
         const std::string settings1String{ R"(
         {
-            "globals": {
-                "showTabsInTitlebar": false,
-                "initialCols" : 240,
-                "initialRows" : 60,
-                "rowsToScroll" : 8
-            }
+            "showTabsInTitlebar": false,
+            "initialCols" : 240,
+            "initialRows" : 60
         })" };
         const auto settings0Json = VerifyParseSucceeded(settings0String);
         const auto settings1Json = VerifyParseSucceeded(settings1String);
@@ -452,18 +482,16 @@ namespace TerminalAppLocalTests
         CascadiaSettings settings;
 
         settings.LayerJson(settings0Json);
-        VERIFY_ARE_EQUAL(true, settings._globals._alwaysShowTabs);
-        VERIFY_ARE_EQUAL(120, settings._globals._initialCols);
-        VERIFY_ARE_EQUAL(30, settings._globals._initialRows);
-        VERIFY_ARE_EQUAL(4, settings._globals._rowsToScroll);
-        VERIFY_ARE_EQUAL(true, settings._globals._showTabsInTitlebar);
+        VERIFY_ARE_EQUAL(true, settings._globals._AlwaysShowTabs);
+        VERIFY_ARE_EQUAL(120, settings._globals._InitialCols);
+        VERIFY_ARE_EQUAL(30, settings._globals._InitialRows);
+        VERIFY_ARE_EQUAL(true, settings._globals._ShowTabsInTitlebar);
 
         settings.LayerJson(settings1Json);
-        VERIFY_ARE_EQUAL(true, settings._globals._alwaysShowTabs);
-        VERIFY_ARE_EQUAL(240, settings._globals._initialCols);
-        VERIFY_ARE_EQUAL(60, settings._globals._initialRows);
-        VERIFY_ARE_EQUAL(8, settings._globals._rowsToScroll);
-        VERIFY_ARE_EQUAL(false, settings._globals._showTabsInTitlebar);
+        VERIFY_ARE_EQUAL(true, settings._globals._AlwaysShowTabs);
+        VERIFY_ARE_EQUAL(240, settings._globals._InitialCols);
+        VERIFY_ARE_EQUAL(60, settings._globals._InitialRows);
+        VERIFY_ARE_EQUAL(false, settings._globals._ShowTabsInTitlebar);
     }
 
     void SettingsTests::ValidateProfileOrdering()
@@ -787,7 +815,7 @@ namespace TerminalAppLocalTests
 
         VERIFY_IS_FALSE(profile0._guid.has_value());
 
-        const auto serialized0Profile = profile0.ToJson();
+        const auto serialized0Profile = profile0.GenerateStub();
         const auto profile1 = Profile::FromJson(serialized0Profile);
         VERIFY_IS_FALSE(profile0._guid.has_value());
         VERIFY_ARE_EQUAL(profile1._guid.has_value(), profile0._guid.has_value());
@@ -798,7 +826,7 @@ namespace TerminalAppLocalTests
 
         VERIFY_IS_TRUE(settings._profiles.at(0)._guid.has_value());
 
-        const auto serialized1Profile = settings._profiles.at(0).ToJson();
+        const auto serialized1Profile = settings._profiles.at(0).GenerateStub();
 
         const auto profile2 = Profile::FromJson(serialized1Profile);
         VERIFY_IS_TRUE(settings._profiles.at(0)._guid.has_value());
@@ -871,7 +899,7 @@ namespace TerminalAppLocalTests
         VERIFY_IS_TRUE(settings._profiles.at(0)._guid.has_value());
         VERIFY_IS_TRUE(settings._profiles.at(1)._guid.has_value());
         VERIFY_ARE_EQUAL(L"Windows PowerShell", settings._profiles.at(0)._name);
-        VERIFY_ARE_EQUAL(L"cmd", settings._profiles.at(1)._name);
+        VERIFY_ARE_EQUAL(L"Command Prompt", settings._profiles.at(1)._name);
 
         settings._ParseJsonString(settings0String, false);
         settings.LayerJson(settings._userSettings);
@@ -972,7 +1000,7 @@ namespace TerminalAppLocalTests
         VERIFY_IS_TRUE(settings._profiles.at(0)._guid.has_value());
         VERIFY_IS_TRUE(settings._profiles.at(1)._guid.has_value());
         VERIFY_ARE_EQUAL(L"Windows PowerShell", settings._profiles.at(0)._name);
-        VERIFY_ARE_EQUAL(L"cmd", settings._profiles.at(1)._name);
+        VERIFY_ARE_EQUAL(L"Command Prompt", settings._profiles.at(1)._name);
 
         settings._ParseJsonString(settings0String, false);
         settings.LayerJson(settings._userSettings);
@@ -983,7 +1011,7 @@ namespace TerminalAppLocalTests
         VERIFY_IS_FALSE(settings._profiles.at(2)._guid.has_value());
         VERIFY_IS_TRUE(settings._profiles.at(3)._guid.has_value());
         VERIFY_ARE_EQUAL(L"Windows PowerShell", settings._profiles.at(0)._name);
-        VERIFY_ARE_EQUAL(L"cmd", settings._profiles.at(1)._name);
+        VERIFY_ARE_EQUAL(L"Command Prompt", settings._profiles.at(1)._name);
         VERIFY_ARE_EQUAL(L"ThisProfileShouldNotCrash", settings._profiles.at(2)._name);
         VERIFY_ARE_EQUAL(L"Ubuntu", settings._profiles.at(3)._name);
 
@@ -994,7 +1022,7 @@ namespace TerminalAppLocalTests
         VERIFY_IS_TRUE(settings._profiles.at(1)._guid.has_value());
         VERIFY_IS_TRUE(settings._profiles.at(2)._guid.has_value());
         VERIFY_IS_TRUE(settings._profiles.at(3)._guid.has_value());
-        VERIFY_ARE_EQUAL(L"cmd", settings._profiles.at(0)._name);
+        VERIFY_ARE_EQUAL(L"Command Prompt", settings._profiles.at(0)._name);
         VERIFY_ARE_EQUAL(L"ThisProfileShouldNotCrash", settings._profiles.at(1)._name);
         VERIFY_ARE_EQUAL(L"Ubuntu", settings._profiles.at(2)._name);
         VERIFY_ARE_EQUAL(L"Windows PowerShell", settings._profiles.at(3)._name);
@@ -1033,7 +1061,7 @@ namespace TerminalAppLocalTests
         VERIFY_IS_TRUE(settings._profiles.at(0)._guid.has_value());
         VERIFY_IS_TRUE(settings._profiles.at(1)._guid.has_value());
         VERIFY_ARE_EQUAL(L"Windows PowerShell", settings._profiles.at(0)._name);
-        VERIFY_ARE_EQUAL(L"cmd", settings._profiles.at(1)._name);
+        VERIFY_ARE_EQUAL(L"Command Prompt", settings._profiles.at(1)._name);
 
         Log::Comment(NoThrowString().Format(
             L"Parse the user settings"));
@@ -1047,7 +1075,7 @@ namespace TerminalAppLocalTests
         VERIFY_IS_FALSE(settings._profiles.at(3)._guid.has_value());
         VERIFY_IS_FALSE(settings._profiles.at(4)._guid.has_value());
         VERIFY_ARE_EQUAL(L"Windows PowerShell", settings._profiles.at(0)._name);
-        VERIFY_ARE_EQUAL(L"cmd", settings._profiles.at(1)._name);
+        VERIFY_ARE_EQUAL(L"Command Prompt", settings._profiles.at(1)._name);
         VERIFY_ARE_EQUAL(L"ThisProfileIsGood", settings._profiles.at(2)._name);
         VERIFY_ARE_EQUAL(L"ThisProfileShouldNotLayer", settings._profiles.at(3)._name);
         VERIFY_ARE_EQUAL(L"NeitherShouldThisOne", settings._profiles.at(4)._name);
@@ -1086,7 +1114,7 @@ namespace TerminalAppLocalTests
         VERIFY_IS_TRUE(settings._profiles.at(0)._guid.has_value());
         VERIFY_IS_TRUE(settings._profiles.at(1)._guid.has_value());
         VERIFY_ARE_EQUAL(L"Windows PowerShell", settings._profiles.at(0)._name);
-        VERIFY_ARE_EQUAL(L"cmd", settings._profiles.at(1)._name);
+        VERIFY_ARE_EQUAL(L"Command Prompt", settings._profiles.at(1)._name);
 
         Log::Comment(NoThrowString().Format(
             L"Parse the user settings"));
@@ -1100,7 +1128,7 @@ namespace TerminalAppLocalTests
         VERIFY_IS_FALSE(settings._profiles.at(3)._guid.has_value());
         VERIFY_IS_FALSE(settings._profiles.at(4)._guid.has_value());
         VERIFY_ARE_EQUAL(L"Windows PowerShell", settings._profiles.at(0)._name);
-        VERIFY_ARE_EQUAL(L"cmd", settings._profiles.at(1)._name);
+        VERIFY_ARE_EQUAL(L"Command Prompt", settings._profiles.at(1)._name);
         VERIFY_ARE_EQUAL(L"ThisProfileIsGood", settings._profiles.at(2)._name);
         VERIFY_ARE_EQUAL(L"ThisProfileShouldNotDuplicate", settings._profiles.at(3)._name);
         VERIFY_ARE_EQUAL(L"NeitherShouldThisOne", settings._profiles.at(4)._name);
@@ -1133,7 +1161,7 @@ namespace TerminalAppLocalTests
             VERIFY_IS_FALSE(settings2._profiles.at(3)._guid.has_value());
             VERIFY_IS_FALSE(settings2._profiles.at(4)._guid.has_value());
             VERIFY_ARE_EQUAL(L"Windows PowerShell", settings2._profiles.at(0)._name);
-            VERIFY_ARE_EQUAL(L"cmd", settings2._profiles.at(1)._name);
+            VERIFY_ARE_EQUAL(L"Command Prompt", settings2._profiles.at(1)._name);
             VERIFY_ARE_EQUAL(L"ThisProfileIsGood", settings2._profiles.at(2)._name);
             VERIFY_ARE_EQUAL(L"ThisProfileShouldNotDuplicate", settings2._profiles.at(3)._name);
             VERIFY_ARE_EQUAL(L"NeitherShouldThisOne", settings2._profiles.at(4)._name);
@@ -1153,7 +1181,7 @@ namespace TerminalAppLocalTests
         VERIFY_ARE_EQUAL(L"ThisProfileShouldNotDuplicate", settings._profiles.at(1)._name);
         VERIFY_ARE_EQUAL(L"NeitherShouldThisOne", settings._profiles.at(2)._name);
         VERIFY_ARE_EQUAL(L"Windows PowerShell", settings._profiles.at(3)._name);
-        VERIFY_ARE_EQUAL(L"cmd", settings._profiles.at(4)._name);
+        VERIFY_ARE_EQUAL(L"Command Prompt", settings._profiles.at(4)._name);
     }
 
     void SettingsTests::TestHideAllProfiles()
@@ -1322,11 +1350,11 @@ namespace TerminalAppLocalTests
         settings._ParseJsonString(settings0String, false);
         settings.LayerJson(settings._userSettings);
 
-        VERIFY_ARE_EQUAL(guid0, settings.FindGuid(name0));
-        VERIFY_ARE_EQUAL(guid1, settings.FindGuid(name1));
-        VERIFY_ARE_EQUAL(guid2, settings.FindGuid(name2));
-        VERIFY_ARE_EQUAL(badGuid, settings.FindGuid(name3));
-        VERIFY_ARE_EQUAL(badGuid, settings.FindGuid(badName));
+        VERIFY_ARE_EQUAL(guid0, settings._GetProfileGuidByName(name0));
+        VERIFY_ARE_EQUAL(guid1, settings._GetProfileGuidByName(name1));
+        VERIFY_ARE_EQUAL(guid2, settings._GetProfileGuidByName(name2));
+        VERIFY_ARE_EQUAL(badGuid, settings._GetProfileGuidByName(name3));
+        VERIFY_ARE_EQUAL(badGuid, settings._GetProfileGuidByName(badName));
 
         auto prof0{ settings.FindProfile(guid0) };
         auto prof1{ settings.FindProfile(guid1) };
@@ -1340,114 +1368,6 @@ namespace TerminalAppLocalTests
         VERIFY_ARE_EQUAL(name2, prof2->GetName());
     }
 
-    void SettingsTests::TestLayerGlobalsOnRoot()
-    {
-        // Test for microsoft/terminal#2906. We added the ability for the root
-        // to be used as the globals object in #2515. However, if you have a
-        // globals object, then the settings in the root would get ignored.
-        // This test ensures that settings from a child "globals" element
-        // _layer_ on top of root properties, and they don't cause the root
-        // properties to be totally ignored.
-
-        const std::string settings0String{ R"(
-        {
-            "globals": {
-                "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}",
-                "initialRows": 123
-            }
-        })" };
-        const std::string settings1String{ R"(
-        {
-            "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}",
-            "initialRows": 234
-        })" };
-        const std::string settings2String{ R"(
-        {
-            "defaultProfile": "{6239a42c-2222-49a3-80bd-e8fdd045185c}",
-            "initialRows": 345,
-            "globals": {
-                "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}"
-                // initialRows should not be cleared here
-            }
-        })" };
-        const std::string settings3String{ R"(
-        {
-            "defaultProfile": "{6239a42c-2222-49a3-80bd-e8fdd045185c}",
-            "globals": {
-                "initialRows": 456
-                // defaultProfile should not be cleared here
-            }
-        })" };
-        const std::string settings4String{ R"(
-        {
-            "defaultProfile": "{6239a42c-2222-49a3-80bd-e8fdd045185c}",
-            "globals": {
-                "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}"
-            },
-            "defaultProfile": "{6239a42c-3333-49a3-80bd-e8fdd045185c}"
-        })" };
-        const std::string settings5String{ R"(
-        {
-            "globals": {
-                "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}"
-            },
-            "defaultProfile": "{6239a42c-2222-49a3-80bd-e8fdd045185c}",
-            "globals": {
-                "defaultProfile": "{6239a42c-3333-49a3-80bd-e8fdd045185c}"
-            }
-        })" };
-
-        VerifyParseSucceeded(settings0String);
-        VerifyParseSucceeded(settings1String);
-        VerifyParseSucceeded(settings2String);
-        VerifyParseSucceeded(settings3String);
-        VerifyParseSucceeded(settings4String);
-        VerifyParseSucceeded(settings5String);
-        const auto guid1 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-1111-49a3-80bd-e8fdd045185c}");
-        const auto guid2 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-2222-49a3-80bd-e8fdd045185c}");
-        const auto guid3 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-3333-49a3-80bd-e8fdd045185c}");
-
-        {
-            CascadiaSettings settings;
-            settings._ParseJsonString(settings0String, false);
-            settings.LayerJson(settings._userSettings);
-            VERIFY_ARE_EQUAL(guid1, settings._globals._defaultProfile);
-            VERIFY_ARE_EQUAL(123, settings._globals._initialRows);
-        }
-        {
-            CascadiaSettings settings;
-            settings._ParseJsonString(settings1String, false);
-            settings.LayerJson(settings._userSettings);
-            VERIFY_ARE_EQUAL(guid1, settings._globals._defaultProfile);
-            VERIFY_ARE_EQUAL(234, settings._globals._initialRows);
-        }
-        {
-            CascadiaSettings settings;
-            settings._ParseJsonString(settings2String, false);
-            settings.LayerJson(settings._userSettings);
-            VERIFY_ARE_EQUAL(guid1, settings._globals._defaultProfile);
-            VERIFY_ARE_EQUAL(345, settings._globals._initialRows);
-        }
-        {
-            CascadiaSettings settings;
-            settings._ParseJsonString(settings3String, false);
-            settings.LayerJson(settings._userSettings);
-            VERIFY_ARE_EQUAL(guid2, settings._globals._defaultProfile);
-            VERIFY_ARE_EQUAL(456, settings._globals._initialRows);
-        }
-        {
-            CascadiaSettings settings;
-            settings._ParseJsonString(settings4String, false);
-            settings.LayerJson(settings._userSettings);
-            VERIFY_ARE_EQUAL(guid1, settings._globals._defaultProfile);
-        }
-        {
-            CascadiaSettings settings;
-            settings._ParseJsonString(settings5String, false);
-            settings.LayerJson(settings._userSettings);
-            VERIFY_ARE_EQUAL(guid3, settings._globals._defaultProfile);
-        }
-    }
     void SettingsTests::TestProfileIconWithEnvVar()
     {
         const auto expectedPath = wil::ExpandEnvironmentStringsW<std::wstring>(L"%WINDIR%\\System32\\x_80.png");
@@ -1466,7 +1386,7 @@ namespace TerminalAppLocalTests
         CascadiaSettings settings{};
         settings._ParseJsonString(settingsJson, false);
         settings.LayerJson(settings._userSettings);
-        VERIFY_IS_FALSE(settings._profiles.empty(), 0);
+        VERIFY_IS_FALSE(settings._profiles.empty());
         VERIFY_ARE_EQUAL(expectedPath, settings._profiles[0].GetExpandedIconPath());
     }
     void SettingsTests::TestProfileBackgroundImageWithEnvVar()
@@ -1487,7 +1407,7 @@ namespace TerminalAppLocalTests
         CascadiaSettings settings{};
         settings._ParseJsonString(settingsJson, false);
         settings.LayerJson(settings._userSettings);
-        VERIFY_IS_FALSE(settings._profiles.empty(), 0);
+        VERIFY_IS_FALSE(settings._profiles.empty());
 
         GlobalAppSettings globalSettings{};
         auto terminalSettings = settings._profiles[0].CreateTerminalSettings(globalSettings.GetColorSchemes());
@@ -1513,10 +1433,6 @@ namespace TerminalAppLocalTests
                 {
                     "name": "profile3",
                     "closeOnExit": null
-                },
-                {
-                    "name": "profile4",
-                    "closeOnExit": { "clearly": "not a string" }
                 }
             ]
         })" };
@@ -1531,7 +1447,6 @@ namespace TerminalAppLocalTests
 
         // Unknown modes parse as "Graceful"
         VERIFY_ARE_EQUAL(CloseOnExitMode::Graceful, settings._profiles[3].GetCloseOnExitMode());
-        VERIFY_ARE_EQUAL(CloseOnExitMode::Graceful, settings._profiles[4].GetCloseOnExitMode());
     }
     void SettingsTests::TestCloseOnExitCompatibilityShim()
     {
@@ -1587,8 +1502,7 @@ namespace TerminalAppLocalTests
         })" };
         VerifyParseSucceeded(settings0String);
 
-        const auto guid1 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-1111-49a3-80bd-e8fdd045185c}");
-        const auto guid2 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-2222-49a3-80bd-e8fdd045185c}");
+        const auto guid1String = L"{6239a42c-1111-49a3-80bd-e8fdd045185c}";
 
         {
             CascadiaSettings settings{ false };
@@ -1598,7 +1512,7 @@ namespace TerminalAppLocalTests
             VERIFY_IS_FALSE(settings._userDefaultProfileSettings == Json::Value::null);
             settings.LayerJson(settings._userSettings);
 
-            VERIFY_ARE_EQUAL(guid1, settings._globals._defaultProfile);
+            VERIFY_ARE_EQUAL(guid1String, settings._globals._unparsedDefaultProfile);
             VERIFY_ARE_EQUAL(2u, settings._profiles.size());
 
             VERIFY_ARE_EQUAL(2345, settings._profiles.at(0)._historySize);
@@ -1634,7 +1548,8 @@ namespace TerminalAppLocalTests
         })" };
         VerifyParseSucceeded(settings0String);
 
-        const auto guid1 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-1111-49a3-80bd-e8fdd045185c}");
+        const auto guid1String = L"{6239a42c-1111-49a3-80bd-e8fdd045185c}";
+        const auto guid1 = Microsoft::Console::Utils::GuidFromString(guid1String);
         const auto guid2 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-2222-49a3-80bd-e8fdd045185c}");
 
         {
@@ -1655,7 +1570,7 @@ namespace TerminalAppLocalTests
 
             settings.LayerJson(settings._userSettings);
 
-            VERIFY_ARE_EQUAL(guid1, settings._globals._defaultProfile);
+            VERIFY_ARE_EQUAL(guid1String, settings._globals._unparsedDefaultProfile);
             VERIFY_ARE_EQUAL(4u, settings._profiles.size());
 
             VERIFY_ARE_EQUAL(guid1, settings._profiles.at(2)._guid);
@@ -2089,4 +2004,577 @@ namespace TerminalAppLocalTests
             VERIFY_ARE_EQUAL(2, termSettings.HistorySize());
         }
     }
+
+    void SettingsTests::FindMissingProfile()
+    {
+        // Test that CascadiaSettings::FindProfile returns null for a GUID that
+        // doesn't exist
+        const std::string settingsString{ R"(
+        {
+            "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}",
+            "profiles": [
+                {
+                    "name" : "profile0",
+                    "guid": "{6239a42c-1111-49a3-80bd-e8fdd045185c}"
+                },
+                {
+                    "name" : "profile1",
+                    "guid": "{6239a42c-2222-49a3-80bd-e8fdd045185c}"
+                }
+            ]
+        })" };
+        const auto settingsJsonObj = VerifyParseSucceeded(settingsString);
+        auto settings = CascadiaSettings::FromJson(settingsJsonObj);
+
+        const auto guid1 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-1111-49a3-80bd-e8fdd045185c}");
+        const auto guid2 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-2222-49a3-80bd-e8fdd045185c}");
+        const auto guid3 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-3333-49a3-80bd-e8fdd045185c}");
+
+        const Profile* const profile1 = settings->FindProfile(guid1);
+        const Profile* const profile2 = settings->FindProfile(guid2);
+        const Profile* const profile3 = settings->FindProfile(guid3);
+
+        VERIFY_IS_NOT_NULL(profile1);
+        VERIFY_IS_NOT_NULL(profile2);
+        VERIFY_IS_NULL(profile3);
+
+        VERIFY_ARE_EQUAL(L"profile0", profile1->GetName());
+        VERIFY_ARE_EQUAL(L"profile1", profile2->GetName());
+    }
+
+    void SettingsTests::MakeSettingsForProfileThatDoesntExist()
+    {
+        // Test that MakeSettings throws when the GUID doesn't exist
+        const std::string settingsString{ R"(
+        {
+            "defaultProfile": "{6239a42c-1111-49a3-80bd-e8fdd045185c}",
+            "profiles": [
+                {
+                    "name" : "profile0",
+                    "guid": "{6239a42c-1111-49a3-80bd-e8fdd045185c}",
+                    "historySize": 1
+                },
+                {
+                    "name" : "profile1",
+                    "guid": "{6239a42c-2222-49a3-80bd-e8fdd045185c}",
+                    "historySize": 2
+                }
+            ]
+        })" };
+        const auto settingsJsonObj = VerifyParseSucceeded(settingsString);
+        auto settings = CascadiaSettings::FromJson(settingsJsonObj);
+        settings->_ResolveDefaultProfile();
+
+        const auto guid1 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-1111-49a3-80bd-e8fdd045185c}");
+        const auto guid2 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-2222-49a3-80bd-e8fdd045185c}");
+        const auto guid3 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-3333-49a3-80bd-e8fdd045185c}");
+
+        try
+        {
+            auto terminalSettings = settings->BuildSettings(guid1);
+            VERIFY_ARE_NOT_EQUAL(nullptr, terminalSettings);
+            VERIFY_ARE_EQUAL(1, terminalSettings.HistorySize());
+        }
+        catch (...)
+        {
+            VERIFY_IS_TRUE(false, L"This call to BuildSettings should succeed");
+        }
+
+        try
+        {
+            auto terminalSettings = settings->BuildSettings(guid2);
+            VERIFY_ARE_NOT_EQUAL(nullptr, terminalSettings);
+            VERIFY_ARE_EQUAL(2, terminalSettings.HistorySize());
+        }
+        catch (...)
+        {
+            VERIFY_IS_TRUE(false, L"This call to BuildSettings should succeed");
+        }
+
+        VERIFY_THROWS(auto terminalSettings = settings->BuildSettings(guid3), wil::ResultException, L"This call to BuildSettings should fail");
+
+        try
+        {
+            const auto [guid, termSettings] = settings->BuildSettings(nullptr);
+            VERIFY_ARE_NOT_EQUAL(nullptr, termSettings);
+            VERIFY_ARE_EQUAL(1, termSettings.HistorySize());
+        }
+        catch (...)
+        {
+            VERIFY_IS_TRUE(false, L"This call to BuildSettings should succeed");
+        }
+    }
+
+    void SettingsTests::MakeSettingsForDefaultProfileThatDoesntExist()
+    {
+        // Test that MakeSettings _doesnt_ throw when we load settings with a
+        // defaultProfile that's not in the list, we validate the settings, and
+        // then call MakeSettings(nullopt). The validation should ensure that
+        // the default profile is something reasonable
+        const std::string settingsString{ R"(
+        {
+            "defaultProfile": "{6239a42c-3333-49a3-80bd-e8fdd045185c}",
+            "profiles": [
+                {
+                    "name" : "profile0",
+                    "guid": "{6239a42c-1111-49a3-80bd-e8fdd045185c}",
+                    "historySize": 1
+                },
+                {
+                    "name" : "profile1",
+                    "guid": "{6239a42c-2222-49a3-80bd-e8fdd045185c}",
+                    "historySize": 2
+                }
+            ]
+        })" };
+        const auto settingsJsonObj = VerifyParseSucceeded(settingsString);
+        auto settings = CascadiaSettings::FromJson(settingsJsonObj);
+        settings->_ValidateSettings();
+
+        VERIFY_ARE_EQUAL(2u, settings->_warnings.size());
+        VERIFY_ARE_EQUAL(2u, settings->_profiles.size());
+        VERIFY_ARE_EQUAL(settings->_globals.DefaultProfile(), settings->_profiles.at(0).GetGuid());
+        try
+        {
+            const auto [guid, termSettings] = settings->BuildSettings(nullptr);
+            VERIFY_ARE_NOT_EQUAL(nullptr, termSettings);
+            VERIFY_ARE_EQUAL(1, termSettings.HistorySize());
+        }
+        catch (...)
+        {
+            VERIFY_IS_TRUE(false, L"This call to BuildSettings should succeed");
+        }
+    }
+
+    void SettingsTests::TestLayerProfileOnColorScheme()
+    {
+        Log::Comment(NoThrowString().Format(
+            L"Ensure that setting (or not) a property in the profile that should override a property of the color scheme works correctly."));
+
+        const std::string settings0String{ R"(
+        {
+            "profiles": [
+                {
+                    "name" : "profile0",
+                    "colorScheme": "schemeWithCursorColor"
+                },
+                {
+                    "name" : "profile1",
+                    "colorScheme": "schemeWithoutCursorColor"
+                },
+                {
+                    "name" : "profile2",
+                    "colorScheme": "schemeWithCursorColor",
+                    "cursorColor": "#234567"
+                },
+                {
+                    "name" : "profile3",
+                    "colorScheme": "schemeWithoutCursorColor",
+                    "cursorColor": "#345678"
+                },
+                {
+                    "name" : "profile4",
+                    "cursorColor": "#456789"
+                },
+                {
+                    "name" : "profile5"
+                }
+            ],
+            "schemes": [
+                {
+                    "name": "schemeWithCursorColor",
+                    "cursorColor": "#123456"
+                },
+                {
+                    "name": "schemeWithoutCursorColor"
+                }
+            ]
+        })" };
+
+        VerifyParseSucceeded(settings0String);
+
+        CascadiaSettings settings;
+        settings._ParseJsonString(settings0String, false);
+        settings.LayerJson(settings._userSettings);
+
+        VERIFY_ARE_EQUAL(6u, settings._profiles.size());
+        VERIFY_ARE_EQUAL(2u, settings._globals._colorSchemes.size());
+
+        auto terminalSettings0 = settings._profiles[0].CreateTerminalSettings(settings._globals._colorSchemes);
+        auto terminalSettings1 = settings._profiles[1].CreateTerminalSettings(settings._globals._colorSchemes);
+        auto terminalSettings2 = settings._profiles[2].CreateTerminalSettings(settings._globals._colorSchemes);
+        auto terminalSettings3 = settings._profiles[3].CreateTerminalSettings(settings._globals._colorSchemes);
+        auto terminalSettings4 = settings._profiles[4].CreateTerminalSettings(settings._globals._colorSchemes);
+        auto terminalSettings5 = settings._profiles[5].CreateTerminalSettings(settings._globals._colorSchemes);
+
+        VERIFY_ARE_EQUAL(ARGB(0, 0x12, 0x34, 0x56), terminalSettings0.CursorColor()); // from color scheme
+        VERIFY_ARE_EQUAL(DEFAULT_CURSOR_COLOR, terminalSettings1.CursorColor()); // default
+        VERIFY_ARE_EQUAL(ARGB(0, 0x23, 0x45, 0x67), terminalSettings2.CursorColor()); // from profile (trumps color scheme)
+        VERIFY_ARE_EQUAL(ARGB(0, 0x34, 0x56, 0x78), terminalSettings3.CursorColor()); // from profile (not set in color scheme)
+        VERIFY_ARE_EQUAL(ARGB(0, 0x45, 0x67, 0x89), terminalSettings4.CursorColor()); // from profile (no color scheme)
+        VERIFY_ARE_EQUAL(DEFAULT_CURSOR_COLOR, terminalSettings5.CursorColor()); // default
+    }
+
+    void SettingsTests::ValidateKeybindingsWarnings()
+    {
+        const std::string badSettings{ R"(
+        {
+            "defaultProfile": "{6239a42c-2222-49a3-80bd-e8fdd045185c}",
+            "profiles": [
+                {
+                    "name" : "profile0",
+                    "guid": "{6239a42c-2222-49a3-80bd-e8fdd045185c}"
+                },
+                {
+                    "name" : "profile1",
+                    "guid": "{6239a42c-3333-49a3-80bd-e8fdd045185c}"
+                }
+            ],
+            "keybindings": [
+                { "command": { "action": "splitPane", "split":"auto" }, "keys": [ "ctrl+alt+t", "ctrl+a" ] },
+                { "command": { "action": "moveFocus" }, "keys": [ "ctrl+a" ] },
+                { "command": { "action": "resizePane" }, "keys": [ "ctrl+b" ] }
+            ]
+        })" };
+
+        const auto settingsObject = VerifyParseSucceeded(badSettings);
+        auto settings = CascadiaSettings::FromJson(settingsObject);
+
+        VERIFY_ARE_EQUAL(0u, settings->_globals._keybindings->_keyShortcuts.size());
+
+        VERIFY_ARE_EQUAL(3u, settings->_globals._keybindingsWarnings.size());
+        VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::TooManyKeysForChord, settings->_globals._keybindingsWarnings.at(0));
+        VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingRequiredParameter, settings->_globals._keybindingsWarnings.at(1));
+        VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingRequiredParameter, settings->_globals._keybindingsWarnings.at(2));
+
+        settings->_ValidateKeybindings();
+
+        VERIFY_ARE_EQUAL(4u, settings->_warnings.size());
+        VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::AtLeastOneKeybindingWarning, settings->_warnings.at(0));
+        VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::TooManyKeysForChord, settings->_warnings.at(1));
+        VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingRequiredParameter, settings->_warnings.at(2));
+        VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingRequiredParameter, settings->_warnings.at(3));
+    }
+
+    void SettingsTests::ValidateExecuteCommandlineWarning()
+    {
+        Log::Comment(L"This test is affected by GH#6949, so we're just skipping it for now.");
+        Log::Result(WEX::Logging::TestResults::Skipped);
+        return;
+
+        // const std::string badSettings{ R"(
+        // {
+        //     "defaultProfile": "{6239a42c-2222-49a3-80bd-e8fdd045185c}",
+        //     "profiles": [
+        //         {
+        //             "name" : "profile0",
+        //             "guid": "{6239a42c-2222-49a3-80bd-e8fdd045185c}"
+        //         },
+        //         {
+        //             "name" : "profile1",
+        //             "guid": "{6239a42c-3333-49a3-80bd-e8fdd045185c}"
+        //         }
+        //     ],
+        //     "keybindings": [
+        //         { "name":null, "command": { "action": "wt" }, "keys": [ "ctrl+a" ] },
+        //         { "name":null, "command": { "action": "wt", "commandline":"" }, "keys": [ "ctrl+b" ] },
+        //         { "name":null, "command": { "action": "wt", "commandline":null }, "keys": [ "ctrl+c" ] }
+        //     ]
+        // })" };
+
+        // const auto settingsObject = VerifyParseSucceeded(badSettings);
+
+        // auto settings = CascadiaSettings::FromJson(settingsObject);
+
+        // VERIFY_ARE_EQUAL(0u, settings->_globals._keybindings->_keyShortcuts.size());
+
+        // for (const auto& warning : settings->_globals._keybindingsWarnings)
+        // {
+        //     Log::Comment(NoThrowString().Format(
+        //         L"warning:%d", warning));
+        // }
+        // VERIFY_ARE_EQUAL(3u, settings->_globals._keybindingsWarnings.size());
+        // VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingRequiredParameter, settings->_globals._keybindingsWarnings.at(0));
+        // VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingRequiredParameter, settings->_globals._keybindingsWarnings.at(1));
+        // VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingRequiredParameter, settings->_globals._keybindingsWarnings.at(2));
+
+        // settings->_ValidateKeybindings();
+
+        // VERIFY_ARE_EQUAL(4u, settings->_warnings.size());
+        // VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::AtLeastOneKeybindingWarning, settings->_warnings.at(0));
+        // VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingRequiredParameter, settings->_warnings.at(1));
+        // VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingRequiredParameter, settings->_warnings.at(2));
+        // VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::MissingRequiredParameter, settings->_warnings.at(3));
+    }
+
+    void SettingsTests::ValidateLegacyGlobalsWarning()
+    {
+        const std::string badSettings{ R"(
+        {
+            "globals": {},
+            "defaultProfile": "{6239a42c-2222-49a3-80bd-e8fdd045185c}",
+            "profiles": [
+                {
+                    "name" : "profile0",
+                    "guid": "{6239a42c-2222-49a3-80bd-e8fdd045185c}"
+                },
+                {
+                    "name" : "profile1",
+                    "guid": "{6239a42c-3333-49a3-80bd-e8fdd045185c}"
+                }
+            ],
+            "keybindings": []
+        })" };
+
+        // Create the default settings
+        CascadiaSettings settings;
+        settings._ParseJsonString(DefaultJson, true);
+        settings.LayerJson(settings._defaultSettings);
+
+        settings._ValidateNoGlobalsKey();
+        VERIFY_ARE_EQUAL(0u, settings._warnings.size());
+
+        // Now layer on the user's settings
+        settings._ParseJsonString(badSettings, false);
+        settings.LayerJson(settings._userSettings);
+
+        settings._ValidateNoGlobalsKey();
+        VERIFY_ARE_EQUAL(1u, settings._warnings.size());
+        VERIFY_ARE_EQUAL(::TerminalApp::SettingsLoadWarnings::LegacyGlobalsProperty, settings._warnings.at(0));
+    }
+
+    void SettingsTests::TestTrailingCommas()
+    {
+        const std::string badSettings{ R"(
+        {
+            "defaultProfile": "{6239a42c-2222-49a3-80bd-e8fdd045185c}",
+            "profiles": [
+                {
+                    "name" : "profile0",
+                    "guid": "{6239a42c-2222-49a3-80bd-e8fdd045185c}"
+                },
+                {
+                    "name" : "profile1",
+                    "guid": "{6239a42c-3333-49a3-80bd-e8fdd045185c}"
+                },
+            ],
+            "keybindings": [],
+        })" };
+
+        // Create the default settings
+        CascadiaSettings settings;
+        settings._ParseJsonString(DefaultJson, true);
+        settings.LayerJson(settings._defaultSettings);
+
+        // Now layer on the user's settings
+        try
+        {
+            settings._ParseJsonString(badSettings, false);
+            settings.LayerJson(settings._userSettings);
+        }
+        catch (...)
+        {
+            VERIFY_IS_TRUE(false, L"This call to LayerJson should succeed, even with the trailing comma");
+        }
+    }
+
+    void SettingsTests::TestCommandsAndKeybindings()
+    {
+        const std::string settingsJson{ R"(
+        {
+            "defaultProfile": "{6239a42c-0000-49a3-80bd-e8fdd045185c}",
+            "profiles": [
+                {
+                    "name": "profile0",
+                    "guid": "{6239a42c-0000-49a3-80bd-e8fdd045185c}",
+                    "historySize": 1,
+                    "commandline": "cmd.exe"
+                },
+                {
+                    "name": "profile1",
+                    "guid": "{6239a42c-1111-49a3-80bd-e8fdd045185c}",
+                    "historySize": 2,
+                    "commandline": "pwsh.exe"
+                },
+                {
+                    "name": "profile2",
+                    "historySize": 3,
+                    "commandline": "wsl.exe"
+                }
+            ],
+            "bindings": [
+                { "keys": "ctrl+a",                   "command": { "action": "splitPane", "split": "vertical" } },
+                {                   "name": "ctrl+b", "command": { "action": "splitPane", "split": "vertical" } },
+                { "keys": "ctrl+c", "name": "ctrl+c", "command": { "action": "splitPane", "split": "vertical" } },
+                { "keys": "ctrl+d",                   "command": { "action": "splitPane", "split": "vertical" } },
+                { "keys": "ctrl+e",                   "command": { "action": "splitPane", "split": "horizontal" } },
+                { "keys": "ctrl+f", "name":null,      "command": { "action": "splitPane", "split": "horizontal" } }
+            ]
+        })" };
+
+        const auto guid0 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-0000-49a3-80bd-e8fdd045185c}");
+        const auto guid1 = Microsoft::Console::Utils::GuidFromString(L"{6239a42c-1111-49a3-80bd-e8fdd045185c}");
+
+        VerifyParseSucceeded(settingsJson);
+        CascadiaSettings settings{};
+        settings._ParseJsonString(settingsJson, false);
+        settings.LayerJson(settings._userSettings);
+        settings._ValidateSettings();
+
+        VERIFY_ARE_EQUAL(3u, settings.GetProfiles().size());
+
+        const auto profile2Guid = settings._profiles.at(2).GetGuid();
+        VERIFY_ARE_NOT_EQUAL(GUID{ 0 }, profile2Guid);
+
+        auto appKeyBindings = settings._globals._keybindings;
+        VERIFY_ARE_EQUAL(5u, appKeyBindings->_keyShortcuts.size());
+
+        // A/D, B, C, E will be in the list of commands, for 4 total.
+        // * A and D share the same name, so they'll only generate a single action.
+        // * F's name is set manually to `null`
+        auto commands = settings._globals.GetCommands();
+        VERIFY_ARE_EQUAL(4u, commands.size());
+
+        {
+            KeyChord kc{ true, false, false, static_cast<int32_t>('A') };
+            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
+            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Vertical, realArgs.SplitStyle());
+            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Commandline().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().StartingDirectory().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().TabTitle().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Profile().empty());
+        }
+
+        Log::Comment(L"Note that we're skipping ctrl+B, since that doesn't have `keys` set.");
+
+        {
+            KeyChord kc{ true, false, false, static_cast<int32_t>('C') };
+            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
+            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Vertical, realArgs.SplitStyle());
+            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Commandline().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().StartingDirectory().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().TabTitle().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Profile().empty());
+        }
+        {
+            KeyChord kc{ true, false, false, static_cast<int32_t>('D') };
+            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
+            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Vertical, realArgs.SplitStyle());
+            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Commandline().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().StartingDirectory().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().TabTitle().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Profile().empty());
+        }
+        {
+            KeyChord kc{ true, false, false, static_cast<int32_t>('E') };
+            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
+            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Horizontal, realArgs.SplitStyle());
+            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Commandline().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().StartingDirectory().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().TabTitle().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Profile().empty());
+        }
+        {
+            KeyChord kc{ true, false, false, static_cast<int32_t>('F') };
+            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
+            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Horizontal, realArgs.SplitStyle());
+            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Commandline().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().StartingDirectory().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().TabTitle().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Profile().empty());
+        }
+
+        Log::Comment(L"Now verify the commands");
+
+        {
+            auto command = commands.at(L"Split pane, direction: Vertical");
+            VERIFY_IS_NOT_NULL(command);
+            auto actionAndArgs = command.Action();
+            VERIFY_IS_NOT_NULL(actionAndArgs);
+            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Vertical, realArgs.SplitStyle());
+            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Commandline().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().StartingDirectory().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().TabTitle().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Profile().empty());
+        }
+        {
+            auto command = commands.at(L"ctrl+b");
+            VERIFY_IS_NOT_NULL(command);
+            auto actionAndArgs = command.Action();
+            VERIFY_IS_NOT_NULL(actionAndArgs);
+            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Vertical, realArgs.SplitStyle());
+            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Commandline().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().StartingDirectory().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().TabTitle().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Profile().empty());
+        }
+        {
+            auto command = commands.at(L"ctrl+c");
+            VERIFY_IS_NOT_NULL(command);
+            auto actionAndArgs = command.Action();
+            VERIFY_IS_NOT_NULL(actionAndArgs);
+            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Vertical, realArgs.SplitStyle());
+            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Commandline().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().StartingDirectory().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().TabTitle().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Profile().empty());
+        }
+        {
+            auto command = commands.at(L"Split pane, direction: Horizontal");
+            VERIFY_IS_NOT_NULL(command);
+            auto actionAndArgs = command.Action();
+            VERIFY_IS_NOT_NULL(actionAndArgs);
+            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Horizontal, realArgs.SplitStyle());
+            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Commandline().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().StartingDirectory().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().TabTitle().empty());
+            VERIFY_IS_TRUE(realArgs.TerminalArgs().Profile().empty());
+        }
+    }
+
 }

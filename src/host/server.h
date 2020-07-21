@@ -21,7 +21,6 @@ Revision History:
 #include "settings.hpp"
 
 #include "conimeinfo.h"
-#include "..\terminal\adapter\MouseInput.hpp"
 #include "VtIo.hpp"
 #include "CursorBlinker.hpp"
 
@@ -29,8 +28,6 @@ Revision History:
 #include "..\server\WaitQueue.h"
 
 #include "..\host\RenderData.hpp"
-
-#include "..\inc\IDefaultColorProvider.hpp"
 
 // clang-format off
 // Flags flags
@@ -76,8 +73,7 @@ class CommandHistory;
 
 class CONSOLE_INFORMATION :
     public Settings,
-    public Microsoft::Console::IIoProvider,
-    public Microsoft::Console::IDefaultColorProvider
+    public Microsoft::Console::IIoProvider
 {
 public:
     CONSOLE_INFORMATION();
@@ -107,8 +103,6 @@ public:
 
     ConsoleImeInfo ConsoleIme;
 
-    Microsoft::Console::VirtualTerminal::MouseInput terminalMouseInput;
-
     void LockConsole();
     bool TryLockConsole();
     void UnlockConsole();
@@ -116,8 +110,6 @@ public:
     ULONG GetCSRecursionCount();
 
     Microsoft::Console::VirtualTerminal::VtIo* GetVtIo();
-
-    static void HandleTerminalKeyEventCallback(_Inout_ std::deque<std::unique_ptr<IInputEvent>>& events);
 
     SCREEN_INFORMATION& GetActiveOutputBuffer() override;
     const SCREEN_INFORMATION& GetActiveOutputBuffer() const override;

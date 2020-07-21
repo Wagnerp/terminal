@@ -24,6 +24,7 @@ Author(s):
 #include "../buffer/out/textBuffer.hpp"
 #include "UiaTextRangeBase.hpp"
 #include "IUiaData.h"
+#include "IUiaTraceable.h"
 
 #include <UIAutomationCore.h>
 
@@ -31,19 +32,19 @@ Author(s):
 
 namespace Microsoft::Console::Types
 {
-    class WindowUiaProviderBase;
     class Viewport;
 
     class ScreenInfoUiaProviderBase :
-        public WRL::RuntimeClass<WRL::RuntimeClassFlags<WRL::ClassicCom | WRL::InhibitFtmBase>, IRawElementProviderSimple, IRawElementProviderFragment, ITextProvider>
+        public WRL::RuntimeClass<WRL::RuntimeClassFlags<WRL::ClassicCom | WRL::InhibitFtmBase>, IRawElementProviderSimple, IRawElementProviderFragment, ITextProvider>,
+        public IUiaTraceable
     {
     public:
-        HRESULT RuntimeClassInitialize(_In_ IUiaData* pData, _In_ std::wstring_view wordDelimiters = UiaTextRangeBase::DefaultWordDelimiter) noexcept;
+        virtual HRESULT RuntimeClassInitialize(_In_ IUiaData* pData, _In_ std::wstring_view wordDelimiters = UiaTextRangeBase::DefaultWordDelimiter) noexcept;
 
-        ScreenInfoUiaProviderBase(const ScreenInfoUiaProviderBase&) = default;
-        ScreenInfoUiaProviderBase(ScreenInfoUiaProviderBase&&) = default;
-        ScreenInfoUiaProviderBase& operator=(const ScreenInfoUiaProviderBase&) = default;
-        ScreenInfoUiaProviderBase& operator=(ScreenInfoUiaProviderBase&&) = default;
+        ScreenInfoUiaProviderBase(const ScreenInfoUiaProviderBase&) = delete;
+        ScreenInfoUiaProviderBase(ScreenInfoUiaProviderBase&&) = delete;
+        ScreenInfoUiaProviderBase& operator=(const ScreenInfoUiaProviderBase&) = delete;
+        ScreenInfoUiaProviderBase& operator=(ScreenInfoUiaProviderBase&&) = delete;
         ~ScreenInfoUiaProviderBase() = default;
 
         [[nodiscard]] HRESULT Signal(_In_ EVENTID id);
@@ -104,9 +105,9 @@ namespace Microsoft::Console::Types
                                         _COM_Outptr_result_maybenull_ UiaTextRangeBase** ppUtr) = 0;
 
         // weak reference to IUiaData
-        IUiaData* _pData;
+        IUiaData* _pData{ nullptr };
 
-        std::wstring _wordDelimiters;
+        std::wstring _wordDelimiters{};
 
     private:
         // this is used to prevent the object from
@@ -120,9 +121,9 @@ namespace Microsoft::Console::Types
         // eventually overflowing the stack.
         // We aren't using this as a cheap locking
         // mechanism for multi-threaded code.
-        std::map<EVENTID, bool> _signalFiringMapping;
+        std::unordered_map<EVENTID, bool> _signalFiringMapping{};
 
-        const COORD _getScreenBufferCoords() const;
+        const COORD _getScreenBufferCoords() const noexcept;
         const TextBuffer& _getTextBuffer() const noexcept;
         const Viewport _getViewport() const noexcept;
         void _LockConsole() noexcept;

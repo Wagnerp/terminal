@@ -42,6 +42,10 @@ namespace TerminalAppLocalTests
         TEST_METHOD(TestArbitraryArgs);
         TEST_METHOD(TestSplitPaneArgs);
 
+        TEST_METHOD(TestStringOverload);
+
+        TEST_METHOD(TestSetTabColorArgs);
+
         TEST_CLASS_SETUP(ClassSetup)
         {
             InitializeJsonReader();
@@ -168,21 +172,18 @@ namespace TerminalAppLocalTests
     {
         const std::string bindings0String{ R"([
             { "command": "copy", "keys": ["ctrl+c"] },
-            { "command": "copyTextWithoutNewlines", "keys": ["alt+c"] },
-            { "command": { "action": "copy", "trimWhitespace": false }, "keys": ["ctrl+shift+c"] },
-            { "command": { "action": "copy", "trimWhitespace": true }, "keys": ["alt+shift+c"] },
+            { "command": { "action": "copy", "singleLine": false }, "keys": ["ctrl+shift+c"] },
+            { "command": { "action": "copy", "singleLine": true }, "keys": ["alt+shift+c"] },
 
             { "command": "newTab", "keys": ["ctrl+t"] },
             { "command": { "action": "newTab", "index": 0 }, "keys": ["ctrl+shift+t"] },
-            { "command": "newTabProfile0", "keys": ["alt+shift+t"] },
             { "command": { "action": "newTab", "index": 11 }, "keys": ["ctrl+shift+y"] },
-            { "command": "newTabProfile8", "keys": ["alt+shift+y"] },
 
             { "command": { "action": "copy", "madeUpBool": true }, "keys": ["ctrl+b"] },
             { "command": { "action": "copy" }, "keys": ["ctrl+shift+b"] },
 
-            { "command": "increaseFontSize", "keys": ["ctrl+f"] },
-            { "command": "decreaseFontSize", "keys": ["ctrl+g"] }
+            { "command": { "action": "adjustFontSize", "delta": 1 }, "keys": ["ctrl+f"] },
+            { "command": { "action": "adjustFontSize", "delta": -1 }, "keys": ["ctrl+g"] }
 
         ])" };
 
@@ -192,28 +193,17 @@ namespace TerminalAppLocalTests
         VERIFY_IS_NOT_NULL(appKeyBindings);
         VERIFY_ARE_EQUAL(0u, appKeyBindings->_keyShortcuts.size());
         appKeyBindings->LayerJson(bindings0Json);
-        VERIFY_ARE_EQUAL(13u, appKeyBindings->_keyShortcuts.size());
+        VERIFY_ARE_EQUAL(10u, appKeyBindings->_keyShortcuts.size());
 
         {
             Log::Comment(NoThrowString().Format(
-                L"Verify that `copy` without args parses as Copy(TrimWhitespace=true)"));
+                L"Verify that `copy` without args parses as Copy(SingleLine=false)"));
             KeyChord kc{ true, false, false, static_cast<int32_t>('C') };
             auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
             const auto& realArgs = actionAndArgs.Args().try_as<CopyTextArgs>();
             VERIFY_IS_NOT_NULL(realArgs);
             // Verify the args have the expected value
-            VERIFY_IS_TRUE(realArgs.TrimWhitespace());
-        }
-
-        {
-            Log::Comment(NoThrowString().Format(
-                L"Verify that `copyTextWithoutNewlines` parses as Copy(TrimWhitespace=false)"));
-            KeyChord kc{ false, true, false, static_cast<int32_t>('C') };
-            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
-            const auto& realArgs = actionAndArgs.Args().try_as<CopyTextArgs>();
-            VERIFY_IS_NOT_NULL(realArgs);
-            // Verify the args have the expected value
-            VERIFY_IS_FALSE(realArgs.TrimWhitespace());
+            VERIFY_IS_FALSE(realArgs.SingleLine());
         }
 
         {
@@ -224,7 +214,7 @@ namespace TerminalAppLocalTests
             const auto& realArgs = actionAndArgs.Args().try_as<CopyTextArgs>();
             VERIFY_IS_NOT_NULL(realArgs);
             // Verify the args have the expected value
-            VERIFY_IS_FALSE(realArgs.TrimWhitespace());
+            VERIFY_IS_FALSE(realArgs.SingleLine());
         }
 
         {
@@ -235,7 +225,7 @@ namespace TerminalAppLocalTests
             const auto& realArgs = actionAndArgs.Args().try_as<CopyTextArgs>();
             VERIFY_IS_NOT_NULL(realArgs);
             // Verify the args have the expected value
-            VERIFY_IS_TRUE(realArgs.TrimWhitespace());
+            VERIFY_IS_TRUE(realArgs.SingleLine());
         }
 
         {
@@ -265,19 +255,6 @@ namespace TerminalAppLocalTests
         }
         {
             Log::Comment(NoThrowString().Format(
-                L"Verify that `newTabProfile0` parses as NewTab(Index=0)"));
-            KeyChord kc{ false, true, true, static_cast<int32_t>('T') };
-            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
-            VERIFY_ARE_EQUAL(ShortcutAction::NewTabProfile0, actionAndArgs.Action());
-            const auto& realArgs = actionAndArgs.Args().try_as<NewTabArgs>();
-            VERIFY_IS_NOT_NULL(realArgs);
-            // Verify the args have the expected value
-            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
-            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs().ProfileIndex());
-            VERIFY_ARE_EQUAL(0, realArgs.TerminalArgs().ProfileIndex().Value());
-        }
-        {
-            Log::Comment(NoThrowString().Format(
                 L"Verify that `newTab` with an index greater than the legacy "
                 L"args afforded parses correctly"));
             KeyChord kc{ true, false, true, static_cast<int32_t>('Y') };
@@ -290,19 +267,6 @@ namespace TerminalAppLocalTests
             VERIFY_IS_NOT_NULL(realArgs.TerminalArgs().ProfileIndex());
             VERIFY_ARE_EQUAL(11, realArgs.TerminalArgs().ProfileIndex().Value());
         }
-        {
-            Log::Comment(NoThrowString().Format(
-                L"Verify that `newTabProfile8` parses as NewTab(Index=8)"));
-            KeyChord kc{ false, true, true, static_cast<int32_t>('Y') };
-            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
-            VERIFY_ARE_EQUAL(ShortcutAction::NewTabProfile8, actionAndArgs.Action());
-            const auto& realArgs = actionAndArgs.Args().try_as<NewTabArgs>();
-            VERIFY_IS_NOT_NULL(realArgs);
-            // Verify the args have the expected value
-            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs());
-            VERIFY_IS_NOT_NULL(realArgs.TerminalArgs().ProfileIndex());
-            VERIFY_ARE_EQUAL(8, realArgs.TerminalArgs().ProfileIndex().Value());
-        }
 
         {
             Log::Comment(NoThrowString().Format(
@@ -313,7 +277,7 @@ namespace TerminalAppLocalTests
             const auto& realArgs = actionAndArgs.Args().try_as<CopyTextArgs>();
             VERIFY_IS_NOT_NULL(realArgs);
             // Verify the args have the expected value
-            VERIFY_IS_TRUE(realArgs.TrimWhitespace());
+            VERIFY_IS_FALSE(realArgs.SingleLine());
         }
 
         {
@@ -325,15 +289,15 @@ namespace TerminalAppLocalTests
             const auto& realArgs = actionAndArgs.Args().try_as<CopyTextArgs>();
             VERIFY_IS_NOT_NULL(realArgs);
             // Verify the args have the expected value
-            VERIFY_IS_TRUE(realArgs.TrimWhitespace());
+            VERIFY_IS_FALSE(realArgs.SingleLine());
         }
 
         {
             Log::Comment(NoThrowString().Format(
-                L"Verify that `increaseFontSize` without args parses as AdjustFontSize(Delta=1)"));
+                L"Verify that `adjustFontSize` with a positive delta parses args correctly"));
             KeyChord kc{ true, false, false, static_cast<int32_t>('F') };
             auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
-            VERIFY_ARE_EQUAL(ShortcutAction::IncreaseFontSize, actionAndArgs.Action());
+            VERIFY_ARE_EQUAL(ShortcutAction::AdjustFontSize, actionAndArgs.Action());
             const auto& realArgs = actionAndArgs.Args().try_as<AdjustFontSizeArgs>();
             VERIFY_IS_NOT_NULL(realArgs);
             // Verify the args have the expected value
@@ -342,10 +306,10 @@ namespace TerminalAppLocalTests
 
         {
             Log::Comment(NoThrowString().Format(
-                L"Verify that `decreaseFontSize` without args parses as AdjustFontSize(Delta=-1)"));
+                L"Verify that `adjustFontSize` with a negative delta parses args correctly"));
             KeyChord kc{ true, false, false, static_cast<int32_t>('G') };
             auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
-            VERIFY_ARE_EQUAL(ShortcutAction::DecreaseFontSize, actionAndArgs.Action());
+            VERIFY_ARE_EQUAL(ShortcutAction::AdjustFontSize, actionAndArgs.Action());
             const auto& realArgs = actionAndArgs.Args().try_as<AdjustFontSizeArgs>();
             VERIFY_IS_NOT_NULL(realArgs);
             // Verify the args have the expected value
@@ -356,15 +320,11 @@ namespace TerminalAppLocalTests
     void KeyBindingsTests::TestSplitPaneArgs()
     {
         const std::string bindings0String{ R"([
-            { "keys": ["ctrl+a"], "command": "splitVertical" },
-            { "keys": ["ctrl+b"], "command": "splitHorizontal" },
             { "keys": ["ctrl+c"], "command": { "action": "splitPane", "split": null } },
             { "keys": ["ctrl+d"], "command": { "action": "splitPane", "split": "vertical" } },
             { "keys": ["ctrl+e"], "command": { "action": "splitPane", "split": "horizontal" } },
-            { "keys": ["ctrl+f"], "command": { "action": "splitPane", "split": "none" } },
             { "keys": ["ctrl+g"], "command": { "action": "splitPane" } },
-            { "keys": ["ctrl+h"], "command": { "action": "splitPane", "split": "auto" } },
-            { "keys": ["ctrl+i"], "command": { "action": "splitPane", "split": "foo" } }
+            { "keys": ["ctrl+h"], "command": { "action": "splitPane", "split": "auto" } }
         ])" };
 
         const auto bindings0Json = VerifyParseSucceeded(bindings0String);
@@ -373,26 +333,8 @@ namespace TerminalAppLocalTests
         VERIFY_IS_NOT_NULL(appKeyBindings);
         VERIFY_ARE_EQUAL(0u, appKeyBindings->_keyShortcuts.size());
         appKeyBindings->LayerJson(bindings0Json);
-        VERIFY_ARE_EQUAL(9u, appKeyBindings->_keyShortcuts.size());
+        VERIFY_ARE_EQUAL(5u, appKeyBindings->_keyShortcuts.size());
 
-        {
-            KeyChord kc{ true, false, false, static_cast<int32_t>('A') };
-            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
-            VERIFY_ARE_EQUAL(ShortcutAction::SplitVertical, actionAndArgs.Action());
-            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
-            VERIFY_IS_NOT_NULL(realArgs);
-            // Verify the args have the expected value
-            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Vertical, realArgs.SplitStyle());
-        }
-        {
-            KeyChord kc{ true, false, false, static_cast<int32_t>('B') };
-            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
-            VERIFY_ARE_EQUAL(ShortcutAction::SplitHorizontal, actionAndArgs.Action());
-            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
-            VERIFY_IS_NOT_NULL(realArgs);
-            // Verify the args have the expected value
-            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Horizontal, realArgs.SplitStyle());
-        }
         {
             KeyChord kc{ true, false, false, static_cast<int32_t>('C') };
             auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
@@ -400,7 +342,7 @@ namespace TerminalAppLocalTests
             const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
             VERIFY_IS_NOT_NULL(realArgs);
             // Verify the args have the expected value
-            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::None, realArgs.SplitStyle());
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Automatic, realArgs.SplitStyle());
         }
         {
             KeyChord kc{ true, false, false, static_cast<int32_t>('D') };
@@ -421,22 +363,13 @@ namespace TerminalAppLocalTests
             VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Horizontal, realArgs.SplitStyle());
         }
         {
-            KeyChord kc{ true, false, false, static_cast<int32_t>('F') };
-            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
-            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
-            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
-            VERIFY_IS_NOT_NULL(realArgs);
-            // Verify the args have the expected value
-            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::None, realArgs.SplitStyle());
-        }
-        {
             KeyChord kc{ true, false, false, static_cast<int32_t>('G') };
             auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
             VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
             const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
             VERIFY_IS_NOT_NULL(realArgs);
             // Verify the args have the expected value
-            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::None, realArgs.SplitStyle());
+            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Automatic, realArgs.SplitStyle());
         }
         {
             KeyChord kc{ true, false, false, static_cast<int32_t>('H') };
@@ -447,15 +380,76 @@ namespace TerminalAppLocalTests
             // Verify the args have the expected value
             VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::Automatic, realArgs.SplitStyle());
         }
+    }
+
+    void KeyBindingsTests::TestSetTabColorArgs()
+    {
+        const std::string bindings0String{ R"([
+            { "keys": ["ctrl+c"], "command": { "action": "setTabColor", "color": null } },
+            { "keys": ["ctrl+d"], "command": { "action": "setTabColor", "color": "#123456" } },
+            { "keys": ["ctrl+f"], "command": "setTabColor" },
+        ])" };
+
+        const auto bindings0Json = VerifyParseSucceeded(bindings0String);
+
+        auto appKeyBindings = winrt::make_self<implementation::AppKeyBindings>();
+        VERIFY_IS_NOT_NULL(appKeyBindings);
+        VERIFY_ARE_EQUAL(0u, appKeyBindings->_keyShortcuts.size());
+        appKeyBindings->LayerJson(bindings0Json);
+        VERIFY_ARE_EQUAL(3u, appKeyBindings->_keyShortcuts.size());
+
         {
-            KeyChord kc{ true, false, false, static_cast<int32_t>('I') };
+            KeyChord kc{ true, false, false, static_cast<int32_t>('C') };
             auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
-            VERIFY_ARE_EQUAL(ShortcutAction::SplitPane, actionAndArgs.Action());
-            const auto& realArgs = actionAndArgs.Args().try_as<SplitPaneArgs>();
+            VERIFY_ARE_EQUAL(ShortcutAction::SetTabColor, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SetTabColorArgs>();
             VERIFY_IS_NOT_NULL(realArgs);
             // Verify the args have the expected value
-            VERIFY_ARE_EQUAL(winrt::TerminalApp::SplitState::None, realArgs.SplitStyle());
+            VERIFY_IS_NULL(realArgs.TabColor());
+        }
+        {
+            KeyChord kc{ true, false, false, static_cast<int32_t>('D') };
+            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
+            VERIFY_ARE_EQUAL(ShortcutAction::SetTabColor, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SetTabColorArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_IS_NOT_NULL(realArgs.TabColor());
+            // Remember that COLORREFs are actually BBGGRR order, while the string is in #RRGGBB order
+            VERIFY_ARE_EQUAL(static_cast<uint32_t>(til::color(0x563412)), realArgs.TabColor().Value());
+        }
+        {
+            KeyChord kc{ true, false, false, static_cast<int32_t>('F') };
+            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
+            VERIFY_ARE_EQUAL(ShortcutAction::SetTabColor, actionAndArgs.Action());
+            const auto& realArgs = actionAndArgs.Args().try_as<SetTabColorArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_IS_NULL(realArgs.TabColor());
         }
     }
 
+    void KeyBindingsTests::TestStringOverload()
+    {
+        const std::string bindings0String{ R"([
+            { "command": "copy", "keys": "ctrl+c" }
+        ])" };
+
+        const auto bindings0Json = VerifyParseSucceeded(bindings0String);
+
+        auto appKeyBindings = winrt::make_self<implementation::AppKeyBindings>();
+        VERIFY_IS_NOT_NULL(appKeyBindings);
+        VERIFY_ARE_EQUAL(0u, appKeyBindings->_keyShortcuts.size());
+        appKeyBindings->LayerJson(bindings0Json);
+        VERIFY_ARE_EQUAL(1u, appKeyBindings->_keyShortcuts.size());
+
+        {
+            KeyChord kc{ true, false, false, static_cast<int32_t>('C') };
+            auto actionAndArgs = TestUtils::GetActionAndArgs(*appKeyBindings, kc);
+            const auto& realArgs = actionAndArgs.Args().try_as<CopyTextArgs>();
+            VERIFY_IS_NOT_NULL(realArgs);
+            // Verify the args have the expected value
+            VERIFY_IS_FALSE(realArgs.SingleLine());
+        }
+    }
 }

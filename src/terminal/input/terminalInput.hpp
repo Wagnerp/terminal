@@ -33,10 +33,37 @@ namespace Microsoft::Console::VirtualTerminal
 
         ~TerminalInput() = default;
 
-        bool HandleKey(const IInputEvent* const pInEvent) const;
-        bool HandleChar(const wchar_t ch);
+        bool HandleKey(const IInputEvent* const pInEvent);
+        void ChangeAnsiMode(const bool ansiMode) noexcept;
         void ChangeKeypadMode(const bool applicationMode) noexcept;
         void ChangeCursorKeysMode(const bool applicationMode) noexcept;
+
+        void ChangeWin32InputMode(const bool win32InputMode) noexcept;
+        void ForceDisableWin32InputMode(const bool win32InputMode) noexcept;
+
+#pragma region MouseInput
+        // These methods are defined in mouseInput.cpp
+        bool HandleMouse(const COORD position,
+                         const unsigned int button,
+                         const short modifierKeyState,
+                         const short delta);
+
+        bool IsTrackingMouseInput() const noexcept;
+#pragma endregion
+
+#pragma region MouseInputState Management
+        // These methods are defined in mouseInputState.cpp
+        void SetUtf8ExtendedMode(const bool enable) noexcept;
+        void SetSGRExtendedMode(const bool enable) noexcept;
+
+        void EnableDefaultTracking(const bool enable) noexcept;
+        void EnableButtonEventTracking(const bool enable) noexcept;
+        void EnableAnyEventTracking(const bool enable) noexcept;
+
+        void EnableAlternateScroll(const bool enable) noexcept;
+        void UseAlternateScreenBuffer() noexcept;
+        void UseMainScreenBuffer() noexcept;
+#pragma endregion
 
     private:
         std::function<void(std::deque<std::unique_ptr<IInputEvent>>&)> _pfnWriteEvents;
@@ -44,11 +71,72 @@ namespace Microsoft::Console::VirtualTerminal
         // storage location for the leading surrogate of a utf-16 surrogate pair
         std::optional<wchar_t> _leadingSurrogate;
 
-        bool _keypadApplicationMode = false;
-        bool _cursorApplicationMode = false;
+        bool _ansiMode{ true };
+        bool _keypadApplicationMode{ false };
+        bool _cursorApplicationMode{ false };
+        bool _win32InputMode{ false };
+        bool _forceDisableWin32InputMode{ false };
 
+        void _SendChar(const wchar_t ch);
         void _SendNullInputSequence(const DWORD dwControlKeyState) const;
-        void _SendInputSequence(const std::wstring_view sequence) const;
+        void _SendInputSequence(const std::wstring_view sequence) const noexcept;
         void _SendEscapedInputSequence(const wchar_t wch) const;
+        static std::wstring _GenerateWin32KeySequence(const KeyEvent& key);
+
+#pragma region MouseInputState Management
+        // These methods are defined in mouseInputState.cpp
+        enum class ExtendedMode : unsigned int
+        {
+            None,
+            Utf8,
+            Sgr,
+            Urxvt
+        };
+
+        enum class TrackingMode : unsigned int
+        {
+            None,
+            Default,
+            ButtonEvent,
+            AnyEvent
+        };
+
+        struct MouseInputState
+        {
+            ExtendedMode extendedMode{ ExtendedMode::None };
+            TrackingMode trackingMode{ TrackingMode::None };
+            bool alternateScroll{ false };
+            bool inAlternateBuffer{ false };
+            COORD lastPos{ -1, -1 };
+            unsigned int lastButton{ 0 };
+            int accumulatedDelta{ 0 };
+        };
+
+        MouseInputState _mouseInputState;
+#pragma endregion
+
+#pragma region MouseInput
+        static std::wstring _GenerateDefaultSequence(const COORD position,
+                                                     const unsigned int button,
+                                                     const bool isHover,
+                                                     const short modifierKeyState,
+                                                     const short delta);
+        static std::wstring _GenerateUtf8Sequence(const COORD position,
+                                                  const unsigned int button,
+                                                  const bool isHover,
+                                                  const short modifierKeyState,
+                                                  const short delta);
+        static std::wstring _GenerateSGRSequence(const COORD position,
+                                                 const unsigned int button,
+                                                 const bool isDown,
+                                                 const bool isHover,
+                                                 const short modifierKeyState,
+                                                 const short delta);
+
+        bool _ShouldSendAlternateScroll(const unsigned int button, const short delta) const noexcept;
+        bool _SendAlternateScroll(const short delta) const noexcept;
+
+        static unsigned int s_GetPressedButton() noexcept;
+#pragma endregion
     };
 }

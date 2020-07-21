@@ -148,6 +148,10 @@ class TextBufferTests
 
     void WriteLinesToBuffer(const std::vector<std::wstring>& text, TextBuffer& buffer);
     TEST_METHOD(GetWordBoundaries);
+    TEST_METHOD(GetGlyphBoundaries);
+
+    TEST_METHOD(GetTextRects);
+    TEST_METHOD(GetText);
 };
 
 void TextBufferTests::TestBufferCreate()
@@ -661,11 +665,11 @@ void TextBufferTests::TestMixedRgbAndLegacyForeground()
     VERIFY_ARE_EQUAL(attrA.IsLegacy(), false);
     VERIFY_ARE_EQUAL(attrB.IsLegacy(), false);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), RGB(64, 128, 255));
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrA), gci.LookupBackgroundColor(si.GetAttributes()));
+    const auto fgColor = RGB(64, 128, 255);
+    const auto bgColor = gci.LookupAttributeColors(si.GetAttributes()).second;
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), RGB(64, 128, 255));
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrB), gci.LookupBackgroundColor(si.GetAttributes()));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA), std::make_pair(fgColor, bgColor));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB), std::make_pair(fgColor, bgColor));
 
     wchar_t* reset = L"\x1b[0m";
     stateMachine.ProcessString(reset);
@@ -705,11 +709,11 @@ void TextBufferTests::TestMixedRgbAndLegacyBackground()
     VERIFY_ARE_EQUAL(attrA.IsLegacy(), false);
     VERIFY_ARE_EQUAL(attrB.IsLegacy(), false);
 
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrA), RGB(64, 128, 255));
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), gci.LookupForegroundColor(si.GetAttributes()));
+    const auto bgColor = RGB(64, 128, 255);
+    const auto fgColor = gci.LookupAttributeColors(si.GetAttributes()).first;
 
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrB), RGB(64, 128, 255));
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), gci.LookupForegroundColor(si.GetAttributes()));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA), std::make_pair(fgColor, bgColor));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB), std::make_pair(fgColor, bgColor));
 
     wchar_t* reset = L"\x1b[0m";
     stateMachine.ProcessString(reset);
@@ -747,11 +751,11 @@ void TextBufferTests::TestMixedRgbAndLegacyUnderline()
     VERIFY_ARE_EQUAL(attrA.IsLegacy(), false);
     VERIFY_ARE_EQUAL(attrB.IsLegacy(), false);
 
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrA), RGB(64, 128, 255));
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), gci.LookupForegroundColor(si.GetAttributes()));
+    const auto bgColor = RGB(64, 128, 255);
+    const auto fgColor = gci.LookupAttributeColors(si.GetAttributes()).first;
 
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrB), RGB(64, 128, 255));
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), gci.LookupForegroundColor(si.GetAttributes()));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA), std::make_pair(fgColor, bgColor));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB), std::make_pair(fgColor, bgColor));
 
     VERIFY_ARE_EQUAL(attrA.GetLegacyAttributes() & COMMON_LVB_UNDERSCORE, 0);
     VERIFY_ARE_EQUAL(attrB.GetLegacyAttributes() & COMMON_LVB_UNDERSCORE, COMMON_LVB_UNDERSCORE);
@@ -795,8 +799,8 @@ void TextBufferTests::TestMixedRgbAndLegacyBrightness()
     VERIFY_ARE_EQUAL(attrA.IsLegacy(), false);
     VERIFY_ARE_EQUAL(attrB.IsLegacy(), false);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), dark_green);
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), bright_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA).first, dark_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB).first, bright_green);
 
     wchar_t* reset = L"\x1b[0m";
     stateMachine.ProcessString(reset);
@@ -846,14 +850,14 @@ void TextBufferTests::TestRgbEraseLine()
         const auto attr0 = attrs[0];
 
         VERIFY_ARE_EQUAL(attr0.IsLegacy(), false);
-        VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attr0), RGB(64, 128, 255));
+        VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attr0).second, RGB(64, 128, 255));
 
         for (auto i = 1; i < len; i++)
         {
             const auto attr = attrs[i];
             LOG_ATTR(attr);
             VERIFY_ARE_EQUAL(attr.IsLegacy(), false);
-            VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attr), RGB(128, 128, 255));
+            VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attr).second, RGB(128, 128, 255));
         }
         std::wstring reset = L"\x1b[0m";
         stateMachine.ProcessString(reset);
@@ -904,8 +908,8 @@ void TextBufferTests::TestUnBold()
     LOG_ATTR(attrA);
     LOG_ATTR(attrB);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), bright_green);
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), dark_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA).first, bright_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB).first, dark_green);
 
     std::wstring reset = L"\x1b[0m";
     stateMachine.ProcessString(reset);
@@ -959,8 +963,8 @@ void TextBufferTests::TestUnBoldRgb()
     VERIFY_ARE_EQUAL(attrA.IsLegacy(), false);
     VERIFY_ARE_EQUAL(attrB.IsLegacy(), false);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), bright_green);
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), dark_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA).first, bright_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB).first, dark_green);
 
     std::wstring reset = L"\x1b[0m";
     stateMachine.ProcessString(reset);
@@ -1032,28 +1036,22 @@ void TextBufferTests::TestComplexUnBold()
     VERIFY_ARE_EQUAL(attrE.IsLegacy(), false);
     VERIFY_ARE_EQUAL(attrF.IsLegacy(), false);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), bright_green);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrA), RGB(1, 2, 3));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA), std::make_pair(bright_green, RGB(1, 2, 3)));
     VERIFY_IS_TRUE(attrA.IsBold());
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), dark_green);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrB), RGB(1, 2, 3));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB), std::make_pair(dark_green, RGB(1, 2, 3)));
     VERIFY_IS_FALSE(attrB.IsBold());
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrC), RGB(32, 32, 32));
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrC), RGB(1, 2, 3));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrC), std::make_pair(RGB(32, 32, 32), RGB(1, 2, 3)));
     VERIFY_IS_FALSE(attrC.IsBold());
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrD), gci.LookupForegroundColor(attrC));
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrD), gci.LookupBackgroundColor(attrC));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrD), gci.LookupAttributeColors(attrC));
     VERIFY_IS_TRUE(attrD.IsBold());
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrE), RGB(64, 64, 64));
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrE), RGB(1, 2, 3));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrE), std::make_pair(RGB(64, 64, 64), RGB(1, 2, 3)));
     VERIFY_IS_TRUE(attrE.IsBold());
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrF), RGB(64, 64, 64));
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrF), RGB(1, 2, 3));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrF), std::make_pair(RGB(64, 64, 64), RGB(1, 2, 3)));
     VERIFY_IS_FALSE(attrF.IsBold());
 
     std::wstring reset = L"\x1b[0m";
@@ -1105,8 +1103,8 @@ void TextBufferTests::CopyAttrs()
     LOG_ATTR(attrA);
     LOG_ATTR(attrB);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), dark_blue);
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), dark_magenta);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA).first, dark_blue);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB).first, dark_magenta);
 }
 
 void TextBufferTests::EmptySgrTest()
@@ -1123,8 +1121,7 @@ void TextBufferTests::EmptySgrTest()
 
     std::wstring reset = L"\x1b[0m";
     stateMachine.ProcessString(reset);
-    const COLORREF defaultFg = gci.LookupForegroundColor(si.GetAttributes());
-    const COLORREF defaultBg = gci.LookupBackgroundColor(si.GetAttributes());
+    const auto [defaultFg, defaultBg] = gci.LookupAttributeColors(si.GetAttributes());
 
     // Case 1 -
     //      Write '\x1b[0mX\x1b[31mX\x1b[31;m'
@@ -1160,14 +1157,11 @@ void TextBufferTests::EmptySgrTest()
     LOG_ATTR(attrB);
     LOG_ATTR(attrC);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), defaultFg);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrA), defaultBg);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA), std::make_pair(defaultFg, defaultBg));
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), darkRed);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrB), defaultBg);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB), std::make_pair(darkRed, defaultBg));
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrC), defaultFg);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrC), defaultBg);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrC), std::make_pair(defaultFg, defaultBg));
 
     stateMachine.ProcessString(reset);
 }
@@ -1187,8 +1181,7 @@ void TextBufferTests::TestReverseReset()
 
     std::wstring reset = L"\x1b[0m";
     stateMachine.ProcessString(reset);
-    const COLORREF defaultFg = gci.LookupForegroundColor(si.GetAttributes());
-    const COLORREF defaultBg = gci.LookupBackgroundColor(si.GetAttributes());
+    const auto [defaultFg, defaultBg] = gci.LookupAttributeColors(si.GetAttributes());
 
     // Case 1 -
     //      Write '\E[42m\E[38;2;128;5;255mX\E[7mX\E[27mX'
@@ -1226,14 +1219,11 @@ void TextBufferTests::TestReverseReset()
     LOG_ATTR(attrB);
     LOG_ATTR(attrC);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), rgbColor);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrA), dark_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA), std::make_pair(rgbColor, dark_green));
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), dark_green);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrB), rgbColor);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB), std::make_pair(dark_green, rgbColor));
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrC), rgbColor);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrC), dark_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrC), std::make_pair(rgbColor, dark_green));
 
     stateMachine.ProcessString(reset);
 }
@@ -1255,8 +1245,7 @@ void TextBufferTests::CopyLastAttr()
 
     std::wstring reset = L"\x1b[0m";
     stateMachine.ProcessString(reset);
-    const COLORREF defaultFg = gci.LookupForegroundColor(si.GetAttributes());
-    const COLORREF defaultBg = gci.LookupBackgroundColor(si.GetAttributes());
+    const auto [defaultFg, defaultBg] = gci.LookupAttributeColors(si.GetAttributes());
 
     const COLORREF solFg = RGB(101, 123, 131);
     const COLORREF solBg = RGB(0, 43, 54);
@@ -1344,23 +1333,17 @@ void TextBufferTests::CopyLastAttr()
     LOG_ATTR(attr3B);
     LOG_ATTR(attr3C);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attr1A), solFg);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attr1A), solBg);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attr1A), std::make_pair(solFg, solBg));
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attr2A), solFg);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attr2A), solBg);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attr2A), std::make_pair(solFg, solBg));
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attr2B), solCyan);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attr2B), solBg);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attr2B), std::make_pair(solCyan, solBg));
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attr3A), solFg);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attr3A), solBg);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attr3A), std::make_pair(solFg, solBg));
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attr3B), solCyan);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attr3B), solBg);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attr3B), std::make_pair(solCyan, solBg));
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attr3C), solFg);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attr3C), solBg);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attr3C), std::make_pair(solFg, solBg));
 
     stateMachine.ProcessString(reset);
 }
@@ -1401,10 +1384,8 @@ void TextBufferTests::TestRgbThenBold()
     VERIFY_ARE_EQUAL(attrA.IsLegacy(), false);
     VERIFY_ARE_EQUAL(attrB.IsLegacy(), false);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), foreground);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrA), background);
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), foreground);
-    VERIFY_ARE_EQUAL(gci.LookupBackgroundColor(attrB), background);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA), std::make_pair(foreground, background));
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB), std::make_pair(foreground, background));
 
     wchar_t* reset = L"\x1b[0m";
     stateMachine.ProcessString(reset);
@@ -1426,8 +1407,7 @@ void TextBufferTests::TestResetClearsBoldness()
     TextAttribute defaultAttribute;
     si.SetAttributes(defaultAttribute);
 
-    const COLORREF defaultFg = gci.LookupForegroundColor(si.GetAttributes());
-    const COLORREF defaultBg = gci.LookupBackgroundColor(si.GetAttributes());
+    const auto [defaultFg, defaultBg] = gci.LookupAttributeColors(si.GetAttributes());
     const auto dark_green = gci.GetColorTableEntry(2);
     const auto bright_green = gci.GetColorTableEntry(10);
 
@@ -1456,10 +1436,10 @@ void TextBufferTests::TestResetClearsBoldness()
     LOG_ATTR(attrC);
     LOG_ATTR(attrD);
 
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrA), dark_green);
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrB), bright_green);
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrC), defaultFg);
-    VERIFY_ARE_EQUAL(gci.LookupForegroundColor(attrD), dark_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrA).first, dark_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrB).first, bright_green);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrC).first, defaultFg);
+    VERIFY_ARE_EQUAL(gci.LookupAttributeColors(attrD).first, dark_green);
 
     VERIFY_IS_FALSE(attrA.IsBold());
     VERIFY_IS_TRUE(attrB.IsBold());
@@ -1569,7 +1549,7 @@ void TextBufferTests::TestBackspaceStringsAPI()
     std::unique_ptr<WriteData> waiter;
 
     size_t aCb = 2;
-    VERIFY_SUCCEEDED(DoWriteConsole(L"a", &aCb, si, waiter));
+    VERIFY_SUCCEEDED(DoWriteConsole(L"a", &aCb, si, false, waiter));
 
     size_t seqCb = 6;
     Log::Comment(NoThrowString().Format(
@@ -1583,9 +1563,9 @@ void TextBufferTests::TestBackspaceStringsAPI()
 
         Log::Comment(NoThrowString().Format(
             L"Using DoWriteConsole, write \\b \\b as a single string."));
-        VERIFY_SUCCEEDED(DoWriteConsole(L"a", &aCb, si, waiter));
+        VERIFY_SUCCEEDED(DoWriteConsole(L"a", &aCb, si, false, waiter));
 
-        VERIFY_SUCCEEDED(DoWriteConsole(str, &seqCb, si, waiter));
+        VERIFY_SUCCEEDED(DoWriteConsole(str, &seqCb, si, false, waiter));
         VERIFY_ARE_EQUAL(cursor.GetPosition().X, x0);
         VERIFY_ARE_EQUAL(cursor.GetPosition().Y, y0);
     }
@@ -1595,10 +1575,10 @@ void TextBufferTests::TestBackspaceStringsAPI()
     Log::Comment(NoThrowString().Format(
         L"Using DoWriteConsole, write \\b \\b as separate strings."));
 
-    VERIFY_SUCCEEDED(DoWriteConsole(L"a", &seqCb, si, waiter));
-    VERIFY_SUCCEEDED(DoWriteConsole(L"\b", &seqCb, si, waiter));
-    VERIFY_SUCCEEDED(DoWriteConsole(L" ", &seqCb, si, waiter));
-    VERIFY_SUCCEEDED(DoWriteConsole(L"\b", &seqCb, si, waiter));
+    VERIFY_SUCCEEDED(DoWriteConsole(L"a", &seqCb, si, false, waiter));
+    VERIFY_SUCCEEDED(DoWriteConsole(L"\b", &seqCb, si, false, waiter));
+    VERIFY_SUCCEEDED(DoWriteConsole(L" ", &seqCb, si, false, waiter));
+    VERIFY_SUCCEEDED(DoWriteConsole(L"\b", &seqCb, si, false, waiter));
 
     VERIFY_ARE_EQUAL(cursor.GetPosition().X, x0);
     VERIFY_ARE_EQUAL(cursor.GetPosition().Y, y0);
@@ -1754,8 +1734,7 @@ void TextBufferTests::ResizeTraditional()
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"shrinkY", shrinkY), L"Shrink Y = true, Grow Y = false");
 
     const COORD smallSize = { 5, 5 };
-    TextAttribute defaultAttr;
-    defaultAttr.SetFromLegacy(0);
+    const TextAttribute defaultAttr(0);
 
     TextBuffer buffer(smallSize, defaultAttr, 12, _renderTarget);
 
@@ -2020,11 +1999,24 @@ void TextBufferTests::TestBurrito()
 
 void TextBufferTests::WriteLinesToBuffer(const std::vector<std::wstring>& text, TextBuffer& buffer)
 {
+    const auto bufferSize = buffer.GetSize();
+
     for (size_t row = 0; row < text.size(); ++row)
     {
         auto line = text[row];
-        OutputCellIterator iter{ line };
-        buffer.WriteLine(iter, { 0, gsl::narrow<SHORT>(row) });
+        if (!line.empty())
+        {
+            // TODO GH#780: writing up to (but not past) the end of the line
+            //              should NOT set the wrap flag
+            std::optional<bool> wrap = true;
+            if (line.size() == static_cast<size_t>(bufferSize.RightExclusive()))
+            {
+                wrap = std::nullopt;
+            }
+
+            OutputCellIterator iter{ line };
+            buffer.Write(iter, { 0, gsl::narrow<SHORT>(row) }, wrap);
+        }
     }
 }
 
@@ -2134,5 +2126,320 @@ void TextBufferTests::GetWordBoundaries()
         COORD result = _buffer->GetWordEnd(test.startPos, delimiters, accessibilityMode);
         const auto expected = accessibilityMode ? test.expected.accessibilityModeEnabled : test.expected.accessibilityModeDisabled;
         VERIFY_ARE_EQUAL(expected, result);
+    }
+}
+
+void TextBufferTests::GetGlyphBoundaries()
+{
+    struct ExpectedResult
+    {
+        std::wstring name;
+        til::point start;
+        til::point wideGlyphEnd;
+        til::point normalEnd;
+    };
+
+    // clang-format off
+    const std::vector<ExpectedResult> expected = {
+        { L"Buffer Start", { 0, 0 },   { 2,  0 },   { 1,  0 } },
+        { L"Line Start",   { 0, 1 },   { 2,  1 },   { 1,  1 } },
+        { L"General Case", { 1, 1 },   { 3,  1 },   { 2,  1 } },
+        { L"Line End",     { 9, 1 },   { 0,  2 },   { 0,  2 } },
+        { L"Buffer End",   { 9, 9 },   { 0, 10 },   { 0, 10 } },
+    };
+    // clang-format on
+
+    BEGIN_TEST_METHOD_PROPERTIES()
+        TEST_METHOD_PROPERTY(L"Data:wideGlyph", L"{false, true}")
+    END_TEST_METHOD_PROPERTIES();
+
+    bool wideGlyph;
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"wideGlyph", wideGlyph), L"Get wide glyph variant");
+
+    COORD bufferSize{ 10, 10 };
+    UINT cursorSize = 12;
+    TextAttribute attr{ 0x7f };
+    auto _buffer = std::make_unique<TextBuffer>(bufferSize, attr, cursorSize, _renderTarget);
+
+    // This is the burrito emoji: 🌯
+    // It's encoded in UTF-16, as needed by the buffer.
+    const auto burrito = L"\xD83C\xDF2F";
+    const wchar_t* const output = wideGlyph ? burrito : L"X";
+
+    const OutputCellIterator iter{ output };
+
+    for (const auto& test : expected)
+    {
+        Log::Comment(test.name.c_str());
+        auto target = test.start;
+        _buffer->Write(iter, target);
+
+        auto start = _buffer->GetGlyphStart(target);
+        auto end = _buffer->GetGlyphEnd(target);
+
+        VERIFY_ARE_EQUAL(test.start, start);
+        VERIFY_ARE_EQUAL(wideGlyph ? test.wideGlyphEnd : test.normalEnd, end);
+    }
+}
+
+void TextBufferTests::GetTextRects()
+{
+    // GetTextRects() is used to...
+    //  - Represent selection rects
+    //  - Represent UiaTextRanges for accessibility
+
+    // This is the burrito emoji: 🌯
+    // It's encoded in UTF-16, as needed by the buffer.
+    const auto burrito = std::wstring(L"\xD83C\xDF2F");
+
+    COORD bufferSize{ 20, 50 };
+    UINT cursorSize = 12;
+    TextAttribute attr{ 0x7f };
+    auto _buffer = std::make_unique<TextBuffer>(bufferSize, attr, cursorSize, _renderTarget);
+
+    // Setup: Write lines of text to the buffer
+    const std::vector<std::wstring> text = { L"0123456789",
+                                             L" " + burrito + L"3456" + burrito,
+                                             L"  " + burrito + L"45" + burrito,
+                                             burrito + L"234567" + burrito,
+                                             L"0123456789" };
+    WriteLinesToBuffer(text, *_buffer);
+    // - - - Text Buffer Contents - - -
+    // |0123456789
+    // | 🌯3456🌯
+    // |  🌯45🌯
+    // |🌯234567🌯
+    // |0123456789
+    // - - - - - - - - - - - - - - - -
+
+    BEGIN_TEST_METHOD_PROPERTIES()
+        TEST_METHOD_PROPERTY(L"Data:blockSelection", L"{false, true}")
+    END_TEST_METHOD_PROPERTIES();
+
+    bool blockSelection;
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"blockSelection", blockSelection), L"Get 'blockSelection' variant");
+
+    std::vector<SMALL_RECT> expected{};
+    if (blockSelection)
+    {
+        expected.push_back({ 1, 0, 7, 0 });
+        expected.push_back({ 1, 1, 8, 1 }); // expand right
+        expected.push_back({ 1, 2, 7, 2 });
+        expected.push_back({ 0, 3, 7, 3 }); // expand left
+        expected.push_back({ 1, 4, 7, 4 });
+    }
+    else
+    {
+        expected.push_back({ 1, 0, 19, 0 });
+        expected.push_back({ 0, 1, 19, 1 });
+        expected.push_back({ 0, 2, 19, 2 });
+        expected.push_back({ 0, 3, 19, 3 });
+        expected.push_back({ 0, 4, 7, 4 });
+    }
+
+    COORD start{ 1, 0 };
+    COORD end{ 7, 4 };
+    const auto result = _buffer->GetTextRects(start, end, blockSelection);
+    VERIFY_ARE_EQUAL(expected.size(), result.size());
+    for (size_t i = 0; i < expected.size(); ++i)
+    {
+        VERIFY_ARE_EQUAL(expected.at(i), result.at(i));
+    }
+}
+
+void TextBufferTests::GetText()
+{
+    // GetText() is used by...
+    //  - Copying text to the clipboard regularly
+    //  - Copying text to the clipboard, with shift held (collapse to one line)
+    //  - Extracting text from a UiaTextRange
+
+    BEGIN_TEST_METHOD_PROPERTIES()
+        TEST_METHOD_PROPERTY(L"Data:wrappedText", L"{false, true}")
+        TEST_METHOD_PROPERTY(L"Data:blockSelection", L"{false, true}")
+        TEST_METHOD_PROPERTY(L"Data:includeCRLF", L"{false, true}")
+        TEST_METHOD_PROPERTY(L"Data:trimTrailingWhitespace", L"{false, true}")
+    END_TEST_METHOD_PROPERTIES();
+
+    bool wrappedText;
+    bool blockSelection;
+    bool includeCRLF;
+    bool trimTrailingWhitespace;
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"wrappedText", wrappedText), L"Get 'wrappedText' variant");
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"blockSelection", blockSelection), L"Get 'blockSelection' variant");
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"includeCRLF", includeCRLF), L"Get 'includeCRLF' variant");
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"trimTrailingWhitespace", trimTrailingWhitespace), L"Get 'trimTrailingWhitespace' variant");
+
+    if (!wrappedText)
+    {
+        COORD bufferSize{ 10, 20 };
+        UINT cursorSize = 12;
+        TextAttribute attr{ 0x7f };
+        auto _buffer = std::make_unique<TextBuffer>(bufferSize, attr, cursorSize, _renderTarget);
+
+        // Setup: Write lines of text to the buffer
+        const std::vector<std::wstring> bufferText = { L"12345",
+                                                       L"  345",
+                                                       L"123  ",
+                                                       L"  3  " };
+        WriteLinesToBuffer(bufferText, *_buffer);
+
+        // simulate a selection from origin to {4,4}
+        const auto textRects = _buffer->GetTextRects({ 0, 0 }, { 4, 4 }, blockSelection);
+
+        std::wstring result = L"";
+        const auto textData = _buffer->GetText(includeCRLF, trimTrailingWhitespace, textRects).text;
+        for (auto& text : textData)
+        {
+            result += text;
+        }
+
+        std::wstring expectedText = L"";
+        if (includeCRLF)
+        {
+            if (trimTrailingWhitespace)
+            {
+                Log::Comment(L"Standard Copy to Clipboard");
+                expectedText += L"12345\r\n";
+                expectedText += L"  345\r\n";
+                expectedText += L"123\r\n";
+                expectedText += L"  3\r\n";
+            }
+            else
+            {
+                Log::Comment(L"UI Automation");
+                if (blockSelection)
+                {
+                    expectedText += L"12345\r\n";
+                    expectedText += L"  345\r\n";
+                    expectedText += L"123  \r\n";
+                    expectedText += L"  3  \r\n";
+                    expectedText += L"     ";
+                }
+                else
+                {
+                    expectedText += L"12345     \r\n";
+                    expectedText += L"  345     \r\n";
+                    expectedText += L"123       \r\n";
+                    expectedText += L"  3       \r\n";
+                    expectedText += L"     ";
+                }
+            }
+        }
+        else
+        {
+            if (trimTrailingWhitespace)
+            {
+                Log::Comment(L"UNDEFINED");
+                expectedText += L"12345";
+                expectedText += L"  345";
+                expectedText += L"123";
+                expectedText += L"  3";
+            }
+            else
+            {
+                Log::Comment(L"Shift+Copy to Clipboard");
+                if (blockSelection)
+                {
+                    expectedText += L"12345";
+                    expectedText += L"  345";
+                    expectedText += L"123  ";
+                    expectedText += L"  3  ";
+                    expectedText += L"     ";
+                }
+                else
+                {
+                    expectedText += L"12345     ";
+                    expectedText += L"  345     ";
+                    expectedText += L"123       ";
+                    expectedText += L"  3       ";
+                    expectedText += L"     ";
+                }
+            }
+        }
+
+        // Verify expected output and actual output are the same
+        VERIFY_ARE_EQUAL(expectedText, result);
+    }
+    else
+    {
+        // Case 2: Wrapped Text
+        COORD bufferSize{ 5, 20 };
+        UINT cursorSize = 12;
+        TextAttribute attr{ 0x7f };
+        auto _buffer = std::make_unique<TextBuffer>(bufferSize, attr, cursorSize, _renderTarget);
+
+        // Setup: Write lines of text to the buffer
+        const std::vector<std::wstring> bufferText = { L"1234567",
+                                                       L"",
+                                                       L"  345",
+                                                       L"123    ",
+                                                       L"" };
+        WriteLinesToBuffer(bufferText, *_buffer);
+        // buffer should look like this:
+        // ______
+        // |12345| <-- wrapped
+        // |67   |
+        // |  345|
+        // |123  | <-- wrapped
+        // |     |
+        // |_____|
+
+        // simulate a selection from origin to {4,5}
+        const auto textRects = _buffer->GetTextRects({ 0, 0 }, { 4, 5 });
+
+        std::wstring result = L"";
+        const auto textData = _buffer->GetText(includeCRLF, trimTrailingWhitespace, textRects).text;
+        for (auto& text : textData)
+        {
+            result += text;
+        }
+
+        std::wstring expectedText = L"";
+        if (includeCRLF)
+        {
+            if (trimTrailingWhitespace)
+            {
+                Log::Comment(L"Standard Copy to Clipboard");
+                expectedText += L"12345";
+                expectedText += L"67\r\n";
+                expectedText += L"  345\r\n";
+                expectedText += L"123  \r\n";
+            }
+            else
+            {
+                Log::Comment(L"UI Automation");
+                expectedText += L"12345";
+                expectedText += L"67   \r\n";
+                expectedText += L"  345\r\n";
+                expectedText += L"123  ";
+                expectedText += L"     \r\n";
+                expectedText += L"     ";
+            }
+        }
+        else
+        {
+            if (trimTrailingWhitespace)
+            {
+                Log::Comment(L"UNDEFINED");
+                expectedText += L"12345";
+                expectedText += L"67";
+                expectedText += L"  345";
+                expectedText += L"123  ";
+            }
+            else
+            {
+                Log::Comment(L"Shift+Copy to Clipboard");
+                expectedText += L"12345";
+                expectedText += L"67   ";
+                expectedText += L"  345";
+                expectedText += L"123  ";
+                expectedText += L"     ";
+                expectedText += L"     ";
+            }
+        }
+
+        // Verify expected output and actual output are the same
+        VERIFY_ARE_EQUAL(expectedText, result);
     }
 }

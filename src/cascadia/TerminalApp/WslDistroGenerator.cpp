@@ -63,20 +63,20 @@ std::vector<TerminalApp::Profile> WslDistroGenerator::GenerateProfiles()
                                              nullptr,
                                              &si,
                                              &pi));
-    switch (WaitForSingleObject(pi.hProcess, INFINITE))
+    switch (WaitForSingleObject(pi.hProcess, 2000))
     {
     case WAIT_OBJECT_0:
         break;
     case WAIT_ABANDONED:
     case WAIT_TIMEOUT:
-        THROW_HR(ERROR_CHILD_NOT_COMPLETE);
+        return profiles;
     case WAIT_FAILED:
         THROW_LAST_ERROR();
     default:
         THROW_HR(ERROR_UNHANDLED_EXCEPTION);
     }
     DWORD exitCode;
-    if (GetExitCodeProcess(pi.hProcess, &exitCode) == false)
+    if (!GetExitCodeProcess(pi.hProcess, &exitCode))
     {
         THROW_HR(E_INVALIDARG);
     }
@@ -116,7 +116,7 @@ std::vector<TerminalApp::Profile> WslDistroGenerator::GenerateProfiles()
                 continue;
             }
 
-            size_t firstChar = distName.find_first_of(L"( ");
+            const size_t firstChar = distName.find_first_of(L"( ");
             // Some localizations don't have a space between the name and "(Default)"
             // https://github.com/microsoft/terminal/issues/1168#issuecomment-500187109
             if (firstChar < distName.size())

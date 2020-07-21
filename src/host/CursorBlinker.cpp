@@ -212,13 +212,13 @@ void CursorBlinker::KillCaretTimer()
 
         bRet = DeleteTimerQueueTimer(_hCaretBlinkTimerQueue,
                                      _hCaretBlinkTimer,
-                                     NULL);
+                                     nullptr);
 
         // According to https://msdn.microsoft.com/en-us/library/windows/desktop/ms682569(v=vs.85).aspx
         // A failure to delete the timer with the LastError being ERROR_IO_PENDING means that the timer is
         // currently in use and will get cleaned up when released. Delete should not be called again.
         // We treat that case as a success.
-        if (bRet == false && GetLastError() != ERROR_IO_PENDING)
+        if (!bRet && GetLastError() != ERROR_IO_PENDING)
         {
             LOG_LAST_ERROR();
         }

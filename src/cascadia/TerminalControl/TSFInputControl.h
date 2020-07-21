@@ -27,6 +27,8 @@ namespace winrt::Microsoft::Terminal::TerminalControl::implementation
         GETSET_PROPERTY(Windows::Foundation::Size, FontSize);
 
         GETSET_PROPERTY(winrt::hstring, FontFace);
+
+        GETSET_PROPERTY(Windows::UI::Text::FontWeight, FontWeight);
     };
 
     struct TSFInputControl : TSFInputControlT<TSFInputControl>
@@ -36,10 +38,10 @@ namespace winrt::Microsoft::Terminal::TerminalControl::implementation
 
         void NotifyFocusEnter();
         void NotifyFocusLeave();
+        void ClearBuffer();
+        void TryRedrawCanvas();
 
         void Close();
-
-        static void OnCompositionChanged(Windows::UI::Xaml::DependencyObject const&, Windows::UI::Xaml::DependencyPropertyChangedEventArgs const&);
 
         // -------------------------------- WinRT Events ---------------------------------
         TYPED_EVENT(CurrentCursorPosition, TerminalControl::TSFInputControl, TerminalControl::CursorPositionEventArgs);
@@ -67,14 +69,22 @@ namespace winrt::Microsoft::Terminal::TerminalControl::implementation
         winrt::Windows::UI::Text::Core::CoreTextEditContext::CompositionStarted_revoker _compositionStartedRevoker;
         winrt::Windows::UI::Text::Core::CoreTextEditContext::CompositionCompleted_revoker _compositionCompletedRevoker;
 
-        Windows::UI::Xaml::Controls::Canvas _canvas;
-        Windows::UI::Xaml::Controls::TextBlock _textBlock;
-
         Windows::UI::Text::Core::CoreTextEditContext _editContext;
 
         std::wstring _inputBuffer;
 
-        void _Create();
+        bool _inComposition;
+        size_t _activeTextStart;
+        void _SendAndClearText();
+        void _RedrawCanvas();
+        bool _focused;
+
+        til::point _currentTerminalCursorPos;
+        double _currentCanvasWidth;
+        double _currentTextBlockHeight;
+        winrt::Windows::Foundation::Rect _currentControlBounds;
+        winrt::Windows::Foundation::Rect _currentTextBounds;
+        winrt::Windows::Foundation::Rect _currentWindowBounds;
     };
 }
 namespace winrt::Microsoft::Terminal::TerminalControl::factory_implementation

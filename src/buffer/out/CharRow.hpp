@@ -27,6 +27,13 @@ Revision History:
 
 class ROW;
 
+enum class DelimiterClass
+{
+    ControlChar,
+    DelimiterChar,
+    RegularChar
+};
+
 // the characters of one row of screen buffer
 // we keep the following values so that we don't write
 // more pixels to the screen than we have to:
@@ -64,6 +71,8 @@ public:
     void ClearGlyph(const size_t column);
     std::wstring GetText() const;
 
+    const DelimiterClass DelimiterClassAt(const size_t column, const std::wstring_view wordDelimiters) const;
+
     // working with glyphs
     const reference GlyphAt(const size_t column) const;
     reference GlyphAt(const size_t column);
@@ -79,7 +88,7 @@ public:
     const UnicodeStorage& GetUnicodeStorage() const noexcept;
     COORD GetStorageKey(const size_t column) const noexcept;
 
-    void UpdateParent(ROW* const pParent) noexcept;
+    void UpdateParent(ROW* const pParent);
 
     friend CharRowCellReference;
     friend constexpr bool operator==(const CharRow& a, const CharRow& b) noexcept;

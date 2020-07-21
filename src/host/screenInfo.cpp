@@ -11,7 +11,7 @@
 #include "handle.h"
 #include "../buffer/out/CharRow.hpp"
 
-#include <math.h>
+#include <cmath>
 #include "../interactivity/inc/ServiceLocator.hpp"
 #include "../types/inc/Viewport.hpp"
 #include "../types/inc/GlyphWidth.hpp"
@@ -55,11 +55,11 @@ SCREEN_INFORMATION::SCREEN_INFORMATION(
     _rcAltSavedClientOld{ 0 },
     _fAltWindowChanged{ false },
     _PopupAttributes{ popupAttributes },
-    _tabStops{},
     _virtualBottom{ 0 },
     _renderTarget{ *this },
     _currentFont{ fontInfo },
-    _desiredFont{ fontInfo }
+    _desiredFont{ fontInfo },
+    _ignoreLegacyEquivalentVTAttributes{ false }
 {
     // Check if VT mode is enabled. Note that this can be true w/o calling
     // SetConsoleMode, if VirtualTerminalLevel is set to !=0 in the registry.
@@ -127,16 +127,6 @@ SCREEN_INFORMATION::~SCREEN_INFORMATION()
 
         const NTSTATUS status = pScreen->_InitializeOutputStateMachine();
 
-        if (pScreen->_IsInVTMode())
-        {
-            // microsoft/terminal#411: If VT mode is enabled, lets construct the
-            // VT tab stops. Without this line, if a user has
-            // VirtualTerminalLevel set, then
-            // SetConsoleMode(ENABLE_VIRTUAL_TERMINAL_PROCESSING) won't set our
-            // tab stops, because we're never going from vt off -> on
-            pScreen->SetDefaultVtTabStops();
-        }
-
         if (NT_SUCCESS(status))
         {
             *ppScreen = pScreen;
@@ -166,7 +156,7 @@ Viewport SCREEN_INFORMATION::GetBufferSize() const
 // Arguments:
 // - <none>
 // Return Value:
-// - a viewport whos height is the height of the "terminal" portion of the
+// - a viewport whose height is the height of the "terminal" portion of the
 //      buffer in terminal scrolling mode, and is the height of the full buffer
 //      in normal scrolling mode.
 Viewport SCREEN_INFORMATION::GetTerminalBufferSize() const
@@ -367,11 +357,14 @@ void SCREEN_INFORMATION::GetScreenBufferInformation(_Out_ PCOORD pcoordSize,
 
     *psrWindow = _viewport.ToInclusive();
 
-    *pwAttributes = gci.GenerateLegacyAttributes(GetAttributes());
-    *pwPopupAttributes = gci.GenerateLegacyAttributes(_PopupAttributes);
+    *pwAttributes = GetAttributes().GetLegacyAttributes();
+    *pwPopupAttributes = _PopupAttributes.GetLegacyAttributes();
 
     // the copy length must be constant for now to keep OACR happy with buffer overruns.
-    memmove(lpColorTable, gci.GetColorTable(), COLOR_TABLE_SIZE * sizeof(COLORREF));
+    for (size_t i = 0; i < COLOR_TABLE_SIZE; i++)
+    {
+        lpColorTable[i] = gci.GetColorTableEntry(i);
+    }
 
     *pcoordMaximumWindowSize = GetMaxWindowSizeInCharacters();
 }
@@ -580,8 +573,6 @@ void SCREEN_INFORMATION::NotifyAccessibilityEventing(const short sStartX,
                                                      const short sEndX,
                                                      const short sEndY)
 {
-    const CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
-
     // Fire off a winevent to let accessibility apps know what changed.
     if (IsActiveScreenBuffer())
     {
@@ -594,7 +585,7 @@ void SCREEN_INFORMATION::NotifyAccessibilityEventing(const short sStartX,
             {
                 const auto cellData = GetCellDataAt({ sStartX, sStartY });
                 const LONG charAndAttr = MAKELONG(Utf16ToUcs2(cellData->Chars()),
-                                                  gci.GenerateLegacyAttributes(cellData->TextAttr()));
+                                                  cellData->TextAttr().GetLegacyAttributes());
                 _pAccessibilityNotifier->NotifyConsoleUpdateSimpleEvent(MAKELONG(sStartX, sStartY),
                                                                         charAndAttr);
             }
@@ -765,7 +756,7 @@ void SCREEN_INFORMATION::SetViewportSize(const COORD* const pcoordSize)
 
     const CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
 
-    // If we're in terminal scrolling mode, and we're rying to set the viewport
+    // If we're in terminal scrolling mode, and we're trying to set the viewport
     //      below the logical viewport, without updating our virtual bottom
     //      (the logical viewport's position), dont.
     //  Instead move us to the bottom of the logical viewport.
@@ -1240,6 +1231,20 @@ void SCREEN_INFORMATION::_InternalSetViewportSize(const COORD* const pcoordSize,
     _viewport = newViewport;
     UpdateBottom();
     Tracing::s_TraceWindowViewport(_viewport);
+
+    // In Conpty mode, call TriggerScroll here without params. By not providing
+    // params, the renderer will make sure to update the VtEngine with the
+    // updated viewport size. If we don't do this, the engine can get into a
+    // torn state on this frame.
+    //
+    // Without this statement, the engine won't be told about the new view size
+    // till the start of the next frame. If any other text gets output before
+    // that frame starts, there's a very real chance that it'll cause errors as
+    // the engine tries to invalidate those regions.
+    if (gci.IsInVtIoMode() && ServiceLocator::LocateGlobals().pRender)
+    {
+        ServiceLocator::LocateGlobals().pRender->TriggerScroll();
+    }
 }
 
 // Routine Description:
@@ -1414,7 +1419,13 @@ bool SCREEN_INFORMATION::IsMaximizedY() const
     // Save cursor's relative height versus the viewport
     SHORT const sCursorHeightInViewportBefore = _textBuffer->GetCursor().GetPosition().Y - _viewport.Top();
 
-    HRESULT hr = TextBuffer::Reflow(*_textBuffer.get(), *newTextBuffer.get());
+    // skip any drawing updates that might occur until we swap _textBuffer with the new buffer or we exit early.
+    newTextBuffer->GetCursor().StartDeferDrawing();
+    _textBuffer->GetCursor().StartDeferDrawing();
+    // we're capturing _textBuffer by reference here because when we exit, we want to EndDefer on the current active buffer.
+    auto endDefer = wil::scope_exit([&]() noexcept { _textBuffer->GetCursor().EndDeferDrawing(); });
+
+    HRESULT hr = TextBuffer::Reflow(*_textBuffer.get(), *newTextBuffer.get(), std::nullopt, std::nullopt);
 
     if (SUCCEEDED(hr))
     {
@@ -1558,10 +1569,18 @@ void SCREEN_INFORMATION::SetCursorInformation(const ULONG Size,
                                               const bool Visible) noexcept
 {
     Cursor& cursor = _textBuffer->GetCursor();
+    const auto originalSize = cursor.GetSize();
 
     cursor.SetSize(Size);
     cursor.SetIsVisible(Visible);
-    cursor.SetType(CursorType::Legacy);
+
+    // If we are just trying to change the visibility, we don't want to reset
+    // the cursor type. We only need to force it to the Legacy style if the
+    // size is actually being changed.
+    if (Size != originalSize)
+    {
+        cursor.SetType(CursorType::Legacy);
+    }
 
     // If we're an alt buffer, also update our main buffer.
     // Users of the API expect both to be set - this can't be set by VT
@@ -1666,7 +1685,26 @@ void SCREEN_INFORMATION::SetCursorDBMode(const bool DoubleCursor)
         return STATUS_INVALID_PARAMETER;
     }
 
+    // In GH#5291, we experimented with manually breaking the line on all cursor
+    // movements here. As we print lines into the buffer, we mark lines as
+    // wrapped when we print the last cell of the row, not the first cell of the
+    // subsequent row (the row the first line wrapped onto).
+    //
+    // Logically, we thought that manually breaking lines when we move the
+    // cursor was a good idea. We however, did not have the time to fully
+    // validate that this was the correct answer, and a simpler solution for the
+    // bug on hand was found. Furthermore, we thought it would be a more
+    // comprehensive solution to only mark lines as wrapped when we print the
+    // first cell of the second row, which would require some WriteCharsLegacy
+    // work.
+
     cursor.SetPosition(Position);
+
+    // If the cursor has moved below the virtual bottom, the bottom should be updated.
+    if (Position.Y > _virtualBottom)
+    {
+        _virtualBottom = Position.Y;
+    }
 
     // if we have the focus, adjust the cursor state
     if (gci.Flags & CONSOLE_HAS_FOCUS)
@@ -1821,7 +1859,7 @@ const SCREEN_INFORMATION& SCREEN_INFORMATION::GetMainBuffer() const
                                                          existingFont,
                                                          WindowSize,
                                                          initAttributes,
-                                                         *GetPopupAttributes(),
+                                                         GetPopupAttributes(),
                                                          Cursor::CURSOR_SMALL_SIZE,
                                                          ppsiNewScreenBuffer);
     if (NT_SUCCESS(Status))
@@ -1839,9 +1877,6 @@ const SCREEN_INFORMATION& SCREEN_INFORMATION::GetMainBuffer() const
 
         // Set up the new buffers references to our current state machine, dispatcher, getset, etc.
         createdBuffer->_stateMachine = _stateMachine;
-
-        // Setup the alt buffer's tabs stops with the default tab stop settings
-        createdBuffer->SetDefaultVtTabStops();
     }
     return Status;
 }
@@ -1890,7 +1925,7 @@ const SCREEN_INFORMATION& SCREEN_INFORMATION::GetMainBuffer() const
         ScreenBufferSizeChange(psiNewAltBuffer->GetBufferSize().Dimensions());
 
         // Tell the VT MouseInput handler that we're in the Alt buffer now
-        gci.terminalMouseInput.UseAlternateScreenBuffer();
+        gci.GetActiveInputBuffer()->GetTerminalInput().UseAlternateScreenBuffer();
     }
     return Status;
 }
@@ -1924,7 +1959,7 @@ void SCREEN_INFORMATION::UseMainScreenBuffer()
         // deleting the alt buffer will give the GetSet back to its main
 
         // Tell the VT MouseInput handler that we're in the main buffer now
-        gci.terminalMouseInput.UseMainScreenBuffer();
+        gci.GetActiveInputBuffer()->GetTerminalInput().UseMainScreenBuffer();
     }
 }
 
@@ -1965,130 +2000,6 @@ bool SCREEN_INFORMATION::_IsInVTMode() const
 }
 
 // Routine Description:
-// - Sets a VT tab stop in the column sColumn. If there is already a tab there, it does nothing.
-// Parameters:
-// - sColumn: the column to add a tab stop to.
-// Return value:
-// - none
-// Note: may throw exception on allocation error
-void SCREEN_INFORMATION::AddTabStop(const SHORT sColumn)
-{
-    if (std::find(_tabStops.begin(), _tabStops.end(), sColumn) == _tabStops.end())
-    {
-        _tabStops.push_back(sColumn);
-        _tabStops.sort();
-    }
-}
-
-// Routine Description:
-// - Clears all of the VT tabs that have been set. This also deletes them.
-// Parameters:
-// <none>
-// Return value:
-// <none>
-void SCREEN_INFORMATION::ClearTabStops() noexcept
-{
-    _tabStops.clear();
-}
-
-// Routine Description:
-// - Clears the VT tab in the column sColumn (if one has been set). Also deletes it from the heap.
-// Parameters:
-// - sColumn - The column to clear the tab stop for.
-// Return value:
-// <none>
-void SCREEN_INFORMATION::ClearTabStop(const SHORT sColumn) noexcept
-{
-    _tabStops.remove(sColumn);
-}
-
-// Routine Description:
-// - Places the location that a forwards tab would take cCurrCursorPos to into pcNewCursorPos
-// Parameters:
-// - cCurrCursorPos - The initial cursor location
-// Return value:
-// - <none>
-COORD SCREEN_INFORMATION::GetForwardTab(const COORD cCurrCursorPos) const noexcept
-{
-    COORD cNewCursorPos = cCurrCursorPos;
-    SHORT sWidth = GetBufferSize().RightInclusive();
-    if (_tabStops.empty() || cCurrCursorPos.X >= _tabStops.back())
-    {
-        cNewCursorPos.X = sWidth;
-    }
-    else
-    {
-        // search for next tab stop
-        for (auto it = _tabStops.cbegin(); it != _tabStops.cend(); ++it)
-        {
-            if (*it > cCurrCursorPos.X)
-            {
-                // make sure we don't exceed the width of the buffer
-                cNewCursorPos.X = std::min(*it, sWidth);
-                break;
-            }
-        }
-    }
-    return cNewCursorPos;
-}
-
-// Routine Description:
-// - Places the location that a backwards tab would take cCurrCursorPos to into pcNewCursorPos
-// Parameters:
-// - cCurrCursorPos - The initial cursor location
-// Return value:
-// - <none>
-COORD SCREEN_INFORMATION::GetReverseTab(const COORD cCurrCursorPos) const noexcept
-{
-    COORD cNewCursorPos = cCurrCursorPos;
-    // if we're at 0, or there are NO tabs, or the first tab is farther right than where we are
-    if (cCurrCursorPos.X == 0 || _tabStops.empty() || _tabStops.front() >= cCurrCursorPos.X)
-    {
-        cNewCursorPos.X = 0;
-    }
-    else
-    {
-        for (auto it = _tabStops.crbegin(); it != _tabStops.crend(); ++it)
-        {
-            if (*it < cCurrCursorPos.X)
-            {
-                cNewCursorPos.X = *it;
-                break;
-            }
-        }
-    }
-    return cNewCursorPos;
-}
-
-// Routine Description:
-// - Returns true if any VT-style tab stops have been set (with AddTabStop)
-// Parameters:
-// <none>
-// Return value:
-// - true if any VT-style tab stops have been set
-bool SCREEN_INFORMATION::AreTabsSet() const noexcept
-{
-    return !_tabStops.empty();
-}
-
-// Routine Description:
-// - adds default tab stops for vt mode
-void SCREEN_INFORMATION::SetDefaultVtTabStops()
-{
-    _tabStops.clear();
-    const int width = GetBufferSize().RightInclusive();
-    FAIL_FAST_IF(width < 0);
-    for (int pos = 0; pos <= width; pos += TAB_SIZE)
-    {
-        _tabStops.push_back(gsl::narrow<short>(pos));
-    }
-    if (_tabStops.back() != width)
-    {
-        _tabStops.push_back(gsl::narrow<short>(width));
-    }
-}
-
-// Routine Description:
 // - Returns the value of the attributes
 // Parameters:
 // <none>
@@ -2105,9 +2016,9 @@ TextAttribute SCREEN_INFORMATION::GetAttributes() const
 // <none>
 // Return value:
 // - This screen buffer's popup attributes
-const TextAttribute* const SCREEN_INFORMATION::GetPopupAttributes() const
+TextAttribute SCREEN_INFORMATION::GetPopupAttributes() const
 {
-    return &_PopupAttributes;
+    return _PopupAttributes;
 }
 
 // Routine Description:
@@ -2119,6 +2030,13 @@ const TextAttribute* const SCREEN_INFORMATION::GetPopupAttributes() const
 // <none>
 void SCREEN_INFORMATION::SetAttributes(const TextAttribute& attributes)
 {
+    if (_ignoreLegacyEquivalentVTAttributes)
+    {
+        // See the comment on StripErroneousVT16VersionsOfLegacyDefaults for more info.
+        _textBuffer->SetCurrentAttributes(TextAttribute::StripErroneousVT16VersionsOfLegacyDefaults(attributes));
+        return;
+    }
+
     _textBuffer->SetCurrentAttributes(attributes);
 
     // If we're an alt buffer, DON'T propagate this setting up to the main buffer.
@@ -2159,7 +2077,7 @@ void SCREEN_INFORMATION::SetDefaultAttributes(const TextAttribute& attributes,
     CONSOLE_INFORMATION& gci = ServiceLocator::LocateGlobals().getConsoleInformation();
 
     const TextAttribute oldPrimaryAttributes = GetAttributes();
-    const TextAttribute oldPopupAttributes = *GetPopupAttributes();
+    const TextAttribute oldPopupAttributes = GetPopupAttributes();
 
     // Quick return if we don't need to do anything.
     if (oldPrimaryAttributes == attributes && oldPopupAttributes == popupAttributes)
@@ -2170,14 +2088,13 @@ void SCREEN_INFORMATION::SetDefaultAttributes(const TextAttribute& attributes,
     SetAttributes(attributes);
     SetPopupAttributes(popupAttributes);
 
-    auto& commandLine = CommandLine::Instance();
-    if (commandLine.HasPopup())
+    // Force repaint of entire viewport, unless we're in conpty mode. In that
+    // case, we don't really need to force a redraw of the entire screen just
+    // because the text attributes changed.
+    if (!(gci.IsInVtIoMode()))
     {
-        commandLine.UpdatePopups(attributes, popupAttributes, oldPrimaryAttributes, oldPopupAttributes);
+        GetRenderTarget().TriggerRedrawAll();
     }
-
-    // force repaint of entire viewport
-    GetRenderTarget().TriggerRedrawAll();
 
     gci.ConsoleIme.RefreshAreaAttributes();
 
@@ -2765,4 +2682,18 @@ Viewport SCREEN_INFORMATION::GetScrollingRegion() const noexcept
                                                   buffer.RightInclusive(),
                                                   marginsSet ? marginRect.Bottom : buffer.BottomInclusive() });
     return margin;
+}
+
+// Routine Description:
+// - Engages the legacy VT handling quirk; see TextAttribute::StripErroneousVT16VersionsOfLegacyDefaults
+void SCREEN_INFORMATION::SetIgnoreLegacyEquivalentVTAttributes() noexcept
+{
+    _ignoreLegacyEquivalentVTAttributes = true;
+}
+
+// Routine Description:
+// - Disengages the legacy VT handling quirk; see TextAttribute::StripErroneousVT16VersionsOfLegacyDefaults
+void SCREEN_INFORMATION::ResetIgnoreLegacyEquivalentVTAttributes() noexcept
+{
+    _ignoreLegacyEquivalentVTAttributes = false;
 }

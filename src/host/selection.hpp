@@ -21,7 +21,7 @@ Revision History:
 #include "input.h"
 
 #include "..\interactivity\inc\IAccessibilityNotifier.hpp"
-#include "..\types\IConsoleWindow.hpp"
+#include "..\interactivity\inc\IConsoleWindow.hpp"
 
 class Selection
 {
@@ -71,15 +71,6 @@ private:
     void _SetSelectionVisibility(const bool fMakeVisible);
 
     void _PaintSelection() const;
-
-    static SMALL_RECT s_BisectSelection(const short sStringLength,
-                                        const COORD coordTargetPoint,
-                                        const SCREEN_INFORMATION& screenInfo,
-                                        const SMALL_RECT rect);
-
-    static std::vector<SMALL_RECT> s_GetSelectionRects(const SMALL_RECT& selectionRect,
-                                                       const COORD selectionAnchor,
-                                                       const bool lineSelection);
 
     void _CancelMarkSelection();
     void _CancelMouseSelection();
