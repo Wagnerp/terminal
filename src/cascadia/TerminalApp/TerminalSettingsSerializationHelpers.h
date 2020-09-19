@@ -18,10 +18,10 @@ Abstract:
 #include "JsonUtils.h"
 #include "SettingsTypes.h"
 
-#include <winrt/Microsoft.Terminal.Settings.h>
+#include <winrt/Microsoft.Terminal.TerminalControl.h>
 #include <winrt/TerminalApp.h>
 
-JSON_ENUM_MAPPER(::winrt::Microsoft::Terminal::Settings::CursorStyle)
+JSON_ENUM_MAPPER(::winrt::Microsoft::Terminal::TerminalControl::CursorStyle)
 {
     static constexpr std::array<pair_type, 5> mappings = {
         pair_type{ "bar", ValueType::Bar },
@@ -42,7 +42,7 @@ JSON_ENUM_MAPPER(::winrt::Windows::UI::Xaml::Media::Stretch)
     };
 };
 
-JSON_ENUM_MAPPER(::winrt::Microsoft::Terminal::Settings::ScrollbarState)
+JSON_ENUM_MAPPER(::winrt::Microsoft::Terminal::TerminalControl::ScrollbarState)
 {
     static constexpr std::array<pair_type, 2> mappings = {
         pair_type{ "visible", ValueType::Visible },
@@ -68,7 +68,7 @@ JSON_ENUM_MAPPER(std::tuple<::winrt::Windows::UI::Xaml::HorizontalAlignment, ::w
     };
 };
 
-JSON_ENUM_MAPPER(::winrt::Microsoft::Terminal::Settings::TextAntialiasingMode)
+JSON_ENUM_MAPPER(::winrt::Microsoft::Terminal::TerminalControl::TextAntialiasingMode)
 {
     static constexpr std::array<pair_type, 3> mappings = {
         pair_type{ "grayscale", ValueType::Grayscale },
@@ -79,7 +79,7 @@ JSON_ENUM_MAPPER(::winrt::Microsoft::Terminal::Settings::TextAntialiasingMode)
 
 // Type Description:
 // - Helper for converting a user-specified closeOnExit value to its corresponding enum
-JSON_ENUM_MAPPER(::TerminalApp::CloseOnExitMode)
+JSON_ENUM_MAPPER(::winrt::TerminalApp::CloseOnExitMode)
 {
     JSON_MAPPINGS(3) = {
         pair_type{ "always", ValueType::Always },
@@ -88,7 +88,7 @@ JSON_ENUM_MAPPER(::TerminalApp::CloseOnExitMode)
     };
 
     // Override mapping parser to add boolean parsing
-    CloseOnExitMode FromJson(const Json::Value& json)
+    ::winrt::TerminalApp::CloseOnExitMode FromJson(const Json::Value& json)
     {
         if (json.isBool())
         {
@@ -101,6 +101,8 @@ JSON_ENUM_MAPPER(::TerminalApp::CloseOnExitMode)
     {
         return EnumMapper::CanConvert(json) || json.isBool();
     }
+
+    using EnumMapper::TypeDescription;
 };
 
 // This specialization isn't using JSON_ENUM_MAPPER because we need to have a different
@@ -151,6 +153,8 @@ struct ::TerminalApp::JsonUtils::ConversionTrait<::winrt::Windows::UI::Text::Fon
     {
         return BaseEnumMapper::CanConvert(json) || json.isUInt();
     }
+
+    using EnumMapper::TypeDescription;
 };
 
 JSON_ENUM_MAPPER(::winrt::Windows::UI::Xaml::ElementTheme)
@@ -180,6 +184,38 @@ JSON_ENUM_MAPPER(::winrt::Microsoft::UI::Xaml::Controls::TabViewWidthMode)
     };
 };
 
+JSON_ENUM_MAPPER(winrt::TerminalApp::ExpandCommandType)
+{
+    JSON_MAPPINGS(2) = {
+        pair_type{ "profiles", ValueType::Profiles },
+        pair_type{ "schemes", ValueType::ColorSchemes },
+    };
+};
+
+JSON_FLAG_MAPPER(::winrt::Microsoft::Terminal::TerminalControl::CopyFormat)
+{
+    JSON_MAPPINGS(5) = {
+        pair_type{ "none", AllClear },
+        pair_type{ "html", ValueType::HTML },
+        pair_type{ "rtf", ValueType::RTF },
+        pair_type{ "all", AllSet },
+    };
+
+    auto FromJson(const Json::Value& json)
+    {
+        if (json.isBool())
+        {
+            return json.asBool() ? AllSet : AllClear;
+        }
+        return BaseFlagMapper::FromJson(json);
+    }
+
+    bool CanConvert(const Json::Value& json)
+    {
+        return BaseFlagMapper::CanConvert(json) || json.isBool();
+    }
+};
+
 // Type Description:
 // - Helper for converting the initial position string into
 //   2 coordinate values. We allow users to only provide one coordinate,
@@ -190,11 +226,11 @@ JSON_ENUM_MAPPER(::winrt::Microsoft::UI::Xaml::Controls::TabViewWidthMode)
 //   (abc, 100): if a value is not valid, we treat it as default
 //   (100, 100, 100): we only read the first two values, this is equivalent to (100, 100)
 template<>
-struct ::TerminalApp::JsonUtils::ConversionTrait<::TerminalApp::LaunchPosition>
+struct ::TerminalApp::JsonUtils::ConversionTrait<::winrt::TerminalApp::LaunchPosition>
 {
-    ::TerminalApp::LaunchPosition FromJson(const Json::Value& json)
+    ::winrt::TerminalApp::LaunchPosition FromJson(const Json::Value& json)
     {
-        ::TerminalApp::LaunchPosition ret;
+        ::winrt::TerminalApp::LaunchPosition ret;
         std::string initialPosition{ json.asString() };
         static constexpr char singleCharDelim = ',';
         std::stringstream tokenStream(initialPosition);
@@ -208,15 +244,15 @@ struct ::TerminalApp::JsonUtils::ConversionTrait<::TerminalApp::LaunchPosition>
         {
             try
             {
-                int32_t position = std::stoi(token);
+                int64_t position = std::stol(token);
                 if (initialPosIndex == 0)
                 {
-                    ret.x.emplace(position);
+                    ret.X = position;
                 }
 
                 if (initialPosIndex == 1)
                 {
-                    ret.y.emplace(position);
+                    ret.Y = position;
                 }
             }
             catch (...)
@@ -230,6 +266,26 @@ struct ::TerminalApp::JsonUtils::ConversionTrait<::TerminalApp::LaunchPosition>
     bool CanConvert(const Json::Value& json)
     {
         return json.isString();
+    }
+
+    Json::Value ToJson(const ::winrt::TerminalApp::LaunchPosition& val)
+    {
+        std::stringstream ss;
+        if (val.X)
+        {
+            ss << val.X.Value();
+        }
+        ss << ",";
+        if (val.Y)
+        {
+            ss << val.Y.Value();
+        }
+        return ss.str();
+    }
+
+    std::string TypeDescription() const
+    {
+        return "x, y";
     }
 };
 
@@ -268,5 +324,14 @@ JSON_ENUM_MAPPER(::winrt::TerminalApp::SettingsTarget)
         pair_type{ "settingsFile", ValueType::SettingsFile },
         pair_type{ "defaultsFile", ValueType::DefaultsFile },
         pair_type{ "allFiles", ValueType::AllFiles },
+    };
+};
+
+JSON_ENUM_MAPPER(::winrt::Windows::System::VirtualKey)
+{
+    JSON_MAPPINGS(3) = {
+        pair_type{ "ctrl", ValueType::Control },
+        pair_type{ "alt", ValueType::Menu },
+        pair_type{ "shift", ValueType::Shift },
     };
 };

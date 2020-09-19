@@ -211,6 +211,9 @@ class ScreenBufferTests
 
     TEST_METHOD(TestCursorIsOn);
 
+    TEST_METHOD(TestAddHyperlink);
+    TEST_METHOD(TestAddHyperlinkCustomId);
+
     TEST_METHOD(UpdateVirtualBottomWhenCursorMovesBelowIt);
 
     TEST_METHOD(TestWriteConsoleVTQuirkMode);
@@ -5016,15 +5019,19 @@ void ScreenBufferTests::TestExtendedTextAttributes()
         TEST_METHOD_PROPERTY(L"Data:bold", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:faint", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:italics", L"{false, true}")
+        TEST_METHOD_PROPERTY(L"Data:underlined", L"{false, true}")
+        TEST_METHOD_PROPERTY(L"Data:doublyUnderlined", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:blink", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:invisible", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:crossedOut", L"{false, true}")
     END_TEST_METHOD_PROPERTIES()
 
-    bool bold, faint, italics, blink, invisible, crossedOut;
+    bool bold, faint, italics, underlined, doublyUnderlined, blink, invisible, crossedOut;
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"bold", bold));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"faint", faint));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"italics", italics));
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"underlined", underlined));
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"doublyUnderlined", doublyUnderlined));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"blink", blink));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"invisible", invisible));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"crossedOut", crossedOut));
@@ -5054,6 +5061,16 @@ void ScreenBufferTests::TestExtendedTextAttributes()
     {
         WI_SetFlag(expectedAttrs, ExtendedAttributes::Italics);
         vtSeq += L"\x1b[3m";
+    }
+    if (underlined)
+    {
+        WI_SetFlag(expectedAttrs, ExtendedAttributes::Underlined);
+        vtSeq += L"\x1b[4m";
+    }
+    if (doublyUnderlined)
+    {
+        WI_SetFlag(expectedAttrs, ExtendedAttributes::DoublyUnderlined);
+        vtSeq += L"\x1b[21m";
     }
     if (blink)
     {
@@ -5120,6 +5137,13 @@ void ScreenBufferTests::TestExtendedTextAttributes()
         vtSeq = L"\x1b[23m";
         validate(expectedAttrs, vtSeq);
     }
+    if (underlined || doublyUnderlined)
+    {
+        // The two underlined attributes share the same reset sequence.
+        WI_ClearAllFlags(expectedAttrs, ExtendedAttributes::Underlined | ExtendedAttributes::DoublyUnderlined);
+        vtSeq = L"\x1b[24m";
+        validate(expectedAttrs, vtSeq);
+    }
     if (blink)
     {
         WI_ClearFlag(expectedAttrs, ExtendedAttributes::Blinking);
@@ -5157,6 +5181,8 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
         TEST_METHOD_PROPERTY(L"Data:bold", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:faint", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:italics", L"{false, true}")
+        TEST_METHOD_PROPERTY(L"Data:underlined", L"{false, true}")
+        TEST_METHOD_PROPERTY(L"Data:doublyUnderlined", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:blink", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:invisible", L"{false, true}")
         TEST_METHOD_PROPERTY(L"Data:crossedOut", L"{false, true}")
@@ -5171,10 +5197,12 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
     const int Use256Color = 2;
     const int UseRGBColor = 3;
 
-    bool bold, faint, italics, blink, invisible, crossedOut;
+    bool bold, faint, italics, underlined, doublyUnderlined, blink, invisible, crossedOut;
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"bold", bold));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"faint", faint));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"italics", italics));
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"underlined", underlined));
+    VERIFY_SUCCEEDED(TestData::TryGetValue(L"doublyUnderlined", doublyUnderlined));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"blink", blink));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"invisible", invisible));
     VERIFY_SUCCEEDED(TestData::TryGetValue(L"crossedOut", crossedOut));
@@ -5208,6 +5236,16 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
     {
         expectedAttr.SetItalic(true);
         vtSeq += L"\x1b[3m";
+    }
+    if (underlined)
+    {
+        expectedAttr.SetUnderlined(true);
+        vtSeq += L"\x1b[4m";
+    }
+    if (doublyUnderlined)
+    {
+        expectedAttr.SetDoublyUnderlined(true);
+        vtSeq += L"\x1b[21m";
     }
     if (blink)
     {
@@ -5317,6 +5355,14 @@ void ScreenBufferTests::TestExtendedTextAttributesWithColors()
     {
         expectedAttr.SetItalic(false);
         vtSeq = L"\x1b[23m";
+        validate(expectedAttr, vtSeq);
+    }
+    if (underlined || doublyUnderlined)
+    {
+        // The two underlined attributes share the same reset sequence.
+        expectedAttr.SetUnderlined(false);
+        expectedAttr.SetDoublyUnderlined(false);
+        vtSeq = L"\x1b[24m";
         validate(expectedAttr, vtSeq);
     }
     if (blink)
@@ -5873,6 +5919,54 @@ void ScreenBufferTests::TestCursorIsOn()
     VERIFY_IS_TRUE(cursor.IsOn());
     VERIFY_IS_FALSE(cursor.IsBlinkingAllowed());
     VERIFY_IS_FALSE(cursor.IsVisible());
+}
+
+void ScreenBufferTests::TestAddHyperlink()
+{
+    auto& g = ServiceLocator::LocateGlobals();
+    auto& gci = g.getConsoleInformation();
+    auto& si = gci.GetActiveOutputBuffer();
+    auto& tbi = si.GetTextBuffer();
+    auto& stateMachine = si.GetStateMachine();
+
+    // Process the opening osc 8 sequence with no custom id
+    stateMachine.ProcessString(L"\x1b]8;;test.url\x9c");
+    VERIFY_IS_TRUE(tbi.GetCurrentAttributes().IsHyperlink());
+    VERIFY_ARE_EQUAL(tbi.GetHyperlinkUriFromId(tbi.GetCurrentAttributes().GetHyperlinkId()), L"test.url");
+
+    // Send any other text
+    stateMachine.ProcessString(L"Hello World");
+    VERIFY_IS_TRUE(tbi.GetCurrentAttributes().IsHyperlink());
+    VERIFY_ARE_EQUAL(tbi.GetHyperlinkUriFromId(tbi.GetCurrentAttributes().GetHyperlinkId()), L"test.url");
+
+    // Process the closing osc 8 sequences
+    stateMachine.ProcessString(L"\x1b]8;;\x9c");
+    VERIFY_IS_FALSE(tbi.GetCurrentAttributes().IsHyperlink());
+}
+
+void ScreenBufferTests::TestAddHyperlinkCustomId()
+{
+    auto& g = ServiceLocator::LocateGlobals();
+    auto& gci = g.getConsoleInformation();
+    auto& si = gci.GetActiveOutputBuffer();
+    auto& tbi = si.GetTextBuffer();
+    auto& stateMachine = si.GetStateMachine();
+
+    // Process the opening osc 8 sequence with a custom id
+    stateMachine.ProcessString(L"\x1b]8;id=myId;test.url\x9c");
+    VERIFY_IS_TRUE(tbi.GetCurrentAttributes().IsHyperlink());
+    VERIFY_ARE_EQUAL(tbi.GetHyperlinkUriFromId(tbi.GetCurrentAttributes().GetHyperlinkId()), L"test.url");
+    VERIFY_ARE_EQUAL(tbi.GetHyperlinkId(L"myId"), tbi.GetCurrentAttributes().GetHyperlinkId());
+
+    // Send any other text
+    stateMachine.ProcessString(L"Hello World");
+    VERIFY_IS_TRUE(tbi.GetCurrentAttributes().IsHyperlink());
+    VERIFY_ARE_EQUAL(tbi.GetHyperlinkUriFromId(tbi.GetCurrentAttributes().GetHyperlinkId()), L"test.url");
+    VERIFY_ARE_EQUAL(tbi.GetHyperlinkId(L"myId"), tbi.GetCurrentAttributes().GetHyperlinkId());
+
+    // Process the closing osc 8 sequences
+    stateMachine.ProcessString(L"\x1b]8;;\x9c");
+    VERIFY_IS_FALSE(tbi.GetCurrentAttributes().IsHyperlink());
 }
 
 void ScreenBufferTests::UpdateVirtualBottomWhenCursorMovesBelowIt()

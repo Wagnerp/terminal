@@ -114,9 +114,11 @@ namespace Microsoft::Console::Render
 
         float GetScaling() const noexcept;
 
-        void SetSelectionBackground(const COLORREF color) noexcept;
+        void SetSelectionBackground(const COLORREF color, const float alpha = 0.5f) noexcept;
         void SetAntialiasingMode(const D2D1_TEXT_ANTIALIAS_MODE antialiasingMode) noexcept;
         void SetDefaultTextBackgroundOpacity(const float opacity) noexcept;
+
+        void UpdateHyperlinkHoveredId(const uint16_t hoveredId) noexcept;
 
     protected:
         [[nodiscard]] HRESULT _DoUpdateTitle(_In_ const std::wstring& newTitle) noexcept override;
@@ -142,6 +144,17 @@ namespace Microsoft::Console::Render
         bool _isEnabled;
         bool _isPainting;
 
+        struct LineMetrics
+        {
+            float gridlineWidth;
+            float underlineOffset;
+            float underlineOffset2;
+            float underlineWidth;
+            float strikethroughOffset;
+            float strikethroughWidth;
+        };
+
+        LineMetrics _lineMetrics;
         til::size _displaySizePixels;
         til::size _glyphCell;
         ::Microsoft::WRL::ComPtr<IBoxDrawingEffect> _boxDrawingEffect;
@@ -152,6 +165,8 @@ namespace Microsoft::Console::Render
         D2D1_COLOR_F _foregroundColor;
         D2D1_COLOR_F _backgroundColor;
         D2D1_COLOR_F _selectionBackground;
+
+        uint16_t _hyperlinkHoveredId;
 
         bool _firstFrame;
         bool _invalidateFullRows;
@@ -177,6 +192,11 @@ namespace Microsoft::Console::Render
         ::Microsoft::WRL::ComPtr<CustomTextLayout> _customLayout;
         ::Microsoft::WRL::ComPtr<CustomTextRenderer> _customRenderer;
         ::Microsoft::WRL::ComPtr<ID2D1StrokeStyle> _strokeStyle;
+        ::Microsoft::WRL::ComPtr<ID2D1StrokeStyle> _dashStrokeStyle;
+        ::Microsoft::WRL::ComPtr<ID2D1StrokeStyle> _hyperlinkStrokeStyle;
+
+        D2D1_STROKE_STYLE_PROPERTIES _strokeStyleProperties;
+        D2D1_STROKE_STYLE_PROPERTIES _dashStrokeStyleProperties;
 
         // Device-Dependent Resources
         bool _recreateDeviceRequested;
@@ -267,7 +287,8 @@ namespace Microsoft::Console::Render
                                                const int dpi,
                                                ::Microsoft::WRL::ComPtr<IDWriteTextFormat>& textFormat,
                                                ::Microsoft::WRL::ComPtr<IDWriteTextAnalyzer1>& textAnalyzer,
-                                               ::Microsoft::WRL::ComPtr<IDWriteFontFace1>& fontFace) const noexcept;
+                                               ::Microsoft::WRL::ComPtr<IDWriteFontFace1>& fontFace,
+                                               LineMetrics& lineMetrics) const noexcept;
 
         [[nodiscard]] til::size _GetClientSize() const;
 

@@ -116,7 +116,7 @@ bool AdaptDispatch::SetGraphicsRendition(const gsl::span<const DispatchTypes::Gr
             case Off:
                 attr.SetDefaultForeground();
                 attr.SetDefaultBackground();
-                attr.SetStandardErase();
+                attr.SetDefaultMetaAttrs();
                 break;
             case ForegroundDefault:
                 attr.SetDefaultForeground();
@@ -167,8 +167,12 @@ bool AdaptDispatch::SetGraphicsRendition(const gsl::span<const DispatchTypes::Gr
             case Underline:
                 attr.SetUnderlined(true);
                 break;
+            case DoublyUnderlined:
+                attr.SetDoublyUnderlined(true);
+                break;
             case NoUnderline:
                 attr.SetUnderlined(false);
+                attr.SetDoublyUnderlined(false);
                 break;
             case Overline:
                 attr.SetOverlined(true);

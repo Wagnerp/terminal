@@ -146,6 +146,13 @@ try
 }
 CATCH_LOG_RETURN_FALSE()
 
+bool TerminalDispatch::SetCursorColor(const DWORD color) noexcept
+try
+{
+    return _terminalApi.SetCursorColor(color);
+}
+CATCH_LOG_RETURN_FALSE()
+
 bool TerminalDispatch::SetClipboard(std::wstring_view content) noexcept
 try
 {
@@ -362,6 +369,27 @@ bool TerminalDispatch::SetPrivateModes(const gsl::span<const DispatchTypes::Priv
 bool TerminalDispatch::ResetPrivateModes(const gsl::span<const DispatchTypes::PrivateModeParams> params) noexcept
 {
     return _SetResetPrivateModes(params, false);
+}
+
+// Method Description:
+// - Start a hyperlink
+// Arguments:
+// - uri - the hyperlink URI
+// - params - the optional custom ID
+// Return Value:
+// - true
+bool TerminalDispatch::AddHyperlink(const std::wstring_view uri, const std::wstring_view params) noexcept
+{
+    return _terminalApi.AddHyperlink(uri, params);
+}
+
+// Method Description:
+// - End a hyperlink
+// Return Value:
+// - true
+bool TerminalDispatch::EndHyperlink() noexcept
+{
+    return _terminalApi.EndHyperlink();
 }
 
 // Routine Description:
